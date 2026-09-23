@@ -45,6 +45,17 @@ a = Analysis(
     noarchive=False,
 )
 
+# Windows provides the ICU entry points Qt expects. A PATH-provided ICU build
+# (for example Poppler's) can export different symbol names and break QtCore.
+if os.name == "nt":
+    a.binaries = [
+        entry for entry in a.binaries
+        if not (
+            os.path.basename(entry[0]).lower() == "icuuc.dll"
+            or re.fullmatch(r"icudt\d*\.dll", os.path.basename(entry[0]), re.IGNORECASE)
+        )
+    ]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

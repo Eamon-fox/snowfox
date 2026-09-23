@@ -6,7 +6,7 @@
 
 #define MyAppVersion GetEnv("LN2_AGENT_VERSION")
 #if MyAppVersion == ""
-  #define MyAppVersion "1.3.16"
+  #define MyAppVersion "1.3.17"
 #endif
 
 #define MyAppExeName "SnowFox-" + MyAppVersion + ".exe"
@@ -61,6 +61,11 @@ Source: "{#SourceDir}\_internal\migrate\*"; DestDir: "{app}\migrate"; Flags: ign
 Source: "{#SourceDir}\_internal\agent_skills\*"; DestDir: "{app}\agent_skills"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\_internal\migration_assets\*"; DestDir: "{app}\migration_assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\installer\windows\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+; Replace the bundled runtime as a unit so stale DLLs cannot survive an upgrade.
+; User inventories and config live outside _internal and are preserved.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\icon.ico"
