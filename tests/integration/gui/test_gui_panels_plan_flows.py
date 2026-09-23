@@ -250,12 +250,12 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         item2 = _make_move_item(record_id=4, position=5, to_position=20)  # same key, diff target
 
         panel.add_plan_items([item1])
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual(10, panel.plan_items[0]["to_position"])
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual(10, panel._plan_store.list_items()[0]["to_position"])
 
         panel.add_plan_items([item2])
-        self.assertEqual(1, len(panel.plan_items))  # still 1, not 2
-        self.assertEqual(20, panel.plan_items[0]["to_position"])  # updated
+        self.assertEqual(1, len(panel._plan_store.list_items()))  # still 1, not 2
+        self.assertEqual(20, panel._plan_store.list_items()[0]["to_position"])  # updated
 
     def test_different_positions_are_not_deduped(self):
         """Items with different positions should NOT be considered duplicates."""
@@ -264,7 +264,7 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         item2 = _make_move_item(record_id=4, position=6, to_position=11)
 
         panel.add_plan_items([item1, item2])
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_different_actions_are_not_deduped(self):
         """Same record+position but different action should NOT be deduped."""
@@ -273,7 +273,7 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         takeout_item = _make_takeout_item(record_id=4, position=5)
 
         panel.add_plan_items([move_item, takeout_item])
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_same_display_position_different_box_are_not_deduped(self):
         """Same position in different boxes should coexist in staged plan."""
@@ -284,8 +284,8 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         panel.add_plan_items([add_box1])
         panel.add_plan_items([add_box2])
 
-        self.assertEqual(2, len(panel.plan_items))
-        self.assertEqual([1, 2], sorted(int(item.get("box")) for item in panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
+        self.assertEqual([1, 2], sorted(int(item.get("box")) for item in panel._plan_store.list_items()))
 
     def test_same_record_edit_restage_merges_fields(self):
         """Same-key edits should merge payload.fields instead of dropping prior keys."""
@@ -304,14 +304,14 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         panel.add_plan_items([item1])
         panel.add_plan_items([item2])
 
-        self.assertEqual(1, len(panel.plan_items))
+        self.assertEqual(1, len(panel._plan_store.list_items()))
         self.assertEqual(
             {
                 "plasmid_name": "p1",
                 "plasmid_id": "id1",
                 "sample": "TetOn-StitchR-Clone4",
             },
-            panel.plan_items[0]["payload"]["fields"],
+            panel._plan_store.list_items()[0]["payload"]["fields"],
         )
 
     def test_mass_restage_same_items_no_growth(self):
@@ -320,12 +320,12 @@ class PlanDedupRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         items = [_make_move_item(record_id=i, position=i, to_position=i + 10) for i in range(1, 11)]
 
         panel.add_plan_items(items)
-        self.assertEqual(10, len(panel.plan_items))
+        self.assertEqual(10, len(panel._plan_store.list_items()))
 
         # AI re-stages same 10 items (possibly with tweaked targets)
         items_v2 = [_make_move_item(record_id=i, position=i, to_position=i + 20) for i in range(1, 11)]
         panel.add_plan_items(items_v2)
-        self.assertEqual(10, len(panel.plan_items))  # no duplicates
+        self.assertEqual(10, len(panel._plan_store.list_items()))  # no duplicates
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is required for GUI panel tests")
 class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
@@ -350,7 +350,7 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
             _make_move_item(record_id=2, position=10, to_position=2, to_box=1),
         ]
         panel.add_plan_items(items)
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
@@ -360,7 +360,7 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
         self.assertEqual(1, len(bridge.batch_move_calls))
         self.assertEqual(0, len(bridge.record_takeout_calls))
         # Plan preserved on failure
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_move_individual_fallback_partial_failure_preserves_entire_plan(self):
         """When 1 of 3 individual moves fails, entire plan should be preserved for retry."""
@@ -381,8 +381,8 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
             panel.execute_plan()
 
         # Entire plan should be preserved (all 3 items)
-        self.assertEqual(3, len(panel.plan_items))
-        preserved_ids = sorted([item["record_id"] for item in panel.plan_items])
+        self.assertEqual(3, len(panel._plan_store.list_items()))
+        preserved_ids = sorted([item["record_id"] for item in panel._plan_store.list_items()])
         self.assertEqual([1, 2, 3], preserved_ids)
 
     def test_takeout_batch_fails_falls_back_to_individual(self):
@@ -403,7 +403,7 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
 
         # batch failed, no individual fallback; plan preserved
         self.assertEqual(0, len(bridge.record_takeout_calls))
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_batch_success_no_fallback(self):
         """When batch_move succeeds, no individual fallback should be triggered."""
@@ -424,7 +424,7 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
         # move batch called once, no individual calls
         self.assertEqual(1, len(bridge.batch_move_calls))
         self.assertEqual(0, len(bridge.record_takeout_calls))
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
 
     def test_phases_continue_after_earlier_failure_preserves_plan(self):
         """Phase 3 should execute even if Phase 2 had failures, but plan is preserved on failure."""
@@ -437,15 +437,15 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
         move = _make_move_item(record_id=1, position=5, to_position=1)
         takeout = _make_takeout_item(record_id=3, position=20)
         panel.add_plan_items([move, takeout])
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
         # On failure, entire plan is preserved
-        self.assertEqual(2, len(panel.plan_items))
-        actions = sorted([item["action"] for item in panel.plan_items])
+        self.assertEqual(2, len(panel._plan_store.list_items()))
+        actions = sorted([item["action"] for item in panel._plan_store.list_items()])
         self.assertEqual(["move", "takeout"], actions)
 
     def test_all_fail_keeps_all_in_plan(self):
@@ -465,7 +465,7 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_dedup_then_execute_end_to_end_with_preserved_plan(self):
         """Full scenario: stage -> execute partial fail (plan preserved) -> use undo + re-stage -> execute succeeds."""
@@ -481,15 +481,15 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
             _make_move_item(record_id=3, position=15, to_position=3),
         ]
         panel.add_plan_items(items)
-        self.assertEqual(3, len(panel.plan_items))
+        self.assertEqual(3, len(panel._plan_store.list_items()))
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
         # On failure, entire plan is preserved (all 3 items)
-        self.assertEqual(3, len(panel.plan_items))
-        preserved_ids = sorted([item["record_id"] for item in panel.plan_items])
+        self.assertEqual(3, len(panel._plan_store.list_items()))
+        preserved_ids = sorted([item["record_id"] for item in panel._plan_store.list_items()])
         self.assertEqual([1, 2, 3], preserved_ids)
 
         # User can use undo to rollback, then re-execute
@@ -509,13 +509,13 @@ class ExecutePlanFallbackRegressionTests(_NoStagePreflightMixin, ManagedPathTest
             _make_move_item(record_id=3, position=15, to_position=3),
         ]
         panel.add_plan_items(items_v2)
-        self.assertEqual(3, len(panel.plan_items))
+        self.assertEqual(3, len(panel._plan_store.list_items()))
 
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
         # All succeeded, plan cleared
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
 
 class _UndoBridge(_FakeOperationsBridge):
     """Bridge that supports rollback for undo tests."""
@@ -626,13 +626,13 @@ class UndoRestoresPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCas
             _make_takeout_item(record_id=2, position=10),
         ]
         panel.add_plan_items(items)
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
         self.assertTrue(panel.undo_btn.isEnabled())
         self.assertEqual(2, len(panel._last_executed_plan))
 
@@ -640,8 +640,8 @@ class UndoRestoresPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCas
             panel.on_undo_last()
 
         self.assertTrue(bridge.rollback_called)
-        self.assertEqual(2, len(panel.plan_items))
-        self.assertEqual("takeout", panel.plan_items[0]["action"])
+        self.assertEqual(2, len(panel._plan_store.list_items()))
+        self.assertEqual("takeout", panel._plan_store.list_items()[0]["action"])
 
     def test_undo_then_stage_rollback_replaces_restored_plan(self):
         """Undo-restored plan items should be replaced when a rollback is staged."""
@@ -657,14 +657,14 @@ class UndoRestoresPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCas
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.on_undo_last()
 
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual("takeout", panel.plan_items[0]["action"])
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual("takeout", panel._plan_store.list_items()[0]["action"])
 
         panel.add_plan_items(
             [build_rollback_plan_item(backup_path="/tmp/undo_second_backup.bak", source="tests")]
         )
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual("rollback", panel.plan_items[0]["action"])
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual("rollback", panel._plan_store.list_items()[0]["action"])
 
     def test_undo_clears_last_executed_plan(self):
         """After undo, _last_executed_plan should be cleared."""
@@ -719,7 +719,7 @@ class UndoRestoresPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCas
             panel.on_undo_last()
 
         self.assertTrue(bridge.rollback_called)
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
 
     def test_undo_does_not_rearm_itself(self):
         """Undo response backup should not create another undo window."""
@@ -774,7 +774,7 @@ class UndoRestoresPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCas
         self.assertEqual(1, len(bridge.rollback_calls))
         self.assertEqual("execute", bridge.rollback_calls[0]["execution_mode"])
         self.assertEqual("/tmp/execute-backup.bak", bridge.rollback_calls[0]["backup_path"])
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is required for GUI panel tests")
 class RollbackConfirmationDialogTests(ManagedPathTestCase):
@@ -852,7 +852,7 @@ class RollbackConfirmationDialogTests(ManagedPathTestCase):
 
             from unittest.mock import patch
 
-            with patch("app_gui.ui.operations_panel.tr", side_effect=_fake_tr), patch.object(
+            with patch("app_gui.ui.operations_panel_confirm.tr", side_effect=_fake_tr), patch.object(
                 QMessageBox,
                 "setInformativeText",
                 new=_capture_info,
@@ -886,7 +886,7 @@ class RollbackConfirmationDialogTests(ManagedPathTestCase):
 
             from unittest.mock import patch
 
-            with patch("app_gui.ui.operations_panel.tr", side_effect=_fake_tr), patch.object(
+            with patch("app_gui.ui.operations_panel_confirm.tr", side_effect=_fake_tr), patch.object(
                 QMessageBox,
                 "setInformativeText",
                 new=_capture_info,
@@ -929,7 +929,7 @@ class RollbackConfirmationDialogTests(ManagedPathTestCase):
 
             from unittest.mock import patch
 
-            with patch("app_gui.ui.operations_panel.tr", side_effect=_fake_tr):
+            with patch("app_gui.ui.operations_panel_plan_table.tr", side_effect=_fake_tr):
                 panel.add_plan_items([rollback_item])
 
             self.assertEqual(1, panel.plan_table.rowCount())
@@ -981,10 +981,10 @@ class PrintPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
         self.assertEqual(2, len(panel._last_executed_plan))
 
-        with patch("app_gui.ui.operations_panel.QDesktopServices.openUrl", return_value=True) as open_url:
+        with patch("PySide6.QtGui.QDesktopServices.openUrl", return_value=True) as open_url:
             panel.print_last_executed()
 
         open_url.assert_called_once()
@@ -1142,13 +1142,13 @@ class PrintPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
         self.assertEqual(2, len(panel._last_executed_plan))
 
         messages = []
         panel.status_message.connect(lambda msg, _timeout, _level: messages.append(msg))
 
-        with patch("app_gui.ui.operations_panel.QDesktopServices.openUrl", return_value=True) as open_url:
+        with patch("PySide6.QtGui.QDesktopServices.openUrl", return_value=True) as open_url:
             panel.print_plan()
 
         open_url.assert_not_called()
@@ -1162,7 +1162,7 @@ class PrintPlanRegressionTests(_NoStagePreflightMixin, ManagedPathTestCase):
         panel.status_message.connect(lambda msg, _timeout, _level: messages.append(msg))
 
         from unittest.mock import patch
-        with patch("app_gui.ui.operations_panel.QDesktopServices.openUrl", return_value=True) as open_url:
+        with patch("PySide6.QtGui.QDesktopServices.openUrl", return_value=True) as open_url:
             panel.print_last_executed()
 
         open_url.assert_not_called()
@@ -1293,7 +1293,7 @@ class PlanPreflightGuardTests(ManagedPathTestCase):
             panel.add_plan_items(items)
 
             self.assertEqual(0, panel.plan_table.rowCount())
-            self.assertEqual(0, len(panel.plan_items))
+            self.assertEqual(0, len(panel._plan_store.list_items()))
             self.assertFalse(panel.plan_exec_btn.isEnabled())
         finally:
             self._cleanup_yaml(tmpdir)
@@ -1312,7 +1312,7 @@ class PlanPreflightGuardTests(ManagedPathTestCase):
 
             panel.add_plan_items([_make_move_item(record_id=1, position=5, to_position=10)])
 
-            self.assertEqual(0, len(panel.plan_items))
+            self.assertEqual(0, len(panel._plan_store.list_items()))
             self.assertFalse(panel.plan_feedback_label.isHidden())
             feedback = panel.plan_feedback_label.text()
             self.assertIn("Target slot Box 1 Position 10 is already occupied.", feedback)
@@ -1365,14 +1365,14 @@ class PlanPreflightGuardTests(ManagedPathTestCase):
             panel = OperationsPanel(bridge=bridge, yaml_path_getter=lambda: yaml_path)
 
             panel.add_plan_items([_make_takeout_item(record_id=1, position=5)])
-            self.assertEqual(1, len(panel.plan_items))
+            self.assertEqual(1, len(panel._plan_store.list_items()))
 
             events = []
             panel.operation_event.connect(lambda ev: events.append(ev))
 
             panel.add_plan_items([_make_takeout_item(record_id=1, position=5)])
 
-            self.assertEqual(1, len(panel.plan_items))
+            self.assertEqual(1, len(panel._plan_store.list_items()))
             self.assertTrue(panel.plan_exec_btn.isEnabled())
             self.assertTrue(panel.plan_feedback_label.isHidden())
             self.assertTrue(events)
@@ -1391,7 +1391,7 @@ class PlanPreflightGuardTests(ManagedPathTestCase):
             panel = OperationsPanel(bridge=bridge, yaml_path_getter=lambda: yaml_path)
 
             panel.add_plan_items([_make_takeout_item(record_id=1, position=5)])
-            self.assertEqual(1, len(panel.plan_items))
+            self.assertEqual(1, len(panel._plan_store.list_items()))
             self.assertTrue(panel.plan_exec_btn.isEnabled())
 
             events = []
@@ -1399,7 +1399,7 @@ class PlanPreflightGuardTests(ManagedPathTestCase):
 
             panel.add_plan_items([_make_takeout_item(record_id=999, position=5)])
 
-            self.assertEqual(1, len(panel.plan_items))
+            self.assertEqual(1, len(panel._plan_store.list_items()))
             self.assertTrue(events)
             self.assertEqual("plan.stage.blocked", events[-1].get("code"))
             self.assertTrue(panel.plan_exec_btn.isEnabled())
@@ -1542,14 +1542,14 @@ class ExecuteFailurePreservesPlanTests(_NoStagePreflightMixin, ManagedPathTestCa
             _make_takeout_item(record_id=3, position=15),
         ]
         panel.add_plan_items(items)
-        original_count = len(panel.plan_items)
+        original_count = len(panel._plan_store.list_items())
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(original_count, len(panel.plan_items))
-        record_ids = [item["record_id"] for item in panel.plan_items]
+        self.assertEqual(original_count, len(panel._plan_store.list_items()))
+        record_ids = [item["record_id"] for item in panel._plan_store.list_items()]
         self.assertEqual([1, 2, 3], record_ids)
 
     def test_execute_partial_failure_preserves_entire_plan(self):
@@ -1564,14 +1564,14 @@ class ExecuteFailurePreservesPlanTests(_NoStagePreflightMixin, ManagedPathTestCa
             _make_takeout_item(record_id=2, position=10),
         ]
         panel.add_plan_items(items)
-        original_ids = [item["record_id"] for item in panel.plan_items]
+        original_ids = [item["record_id"] for item in panel._plan_store.list_items()]
 
         from unittest.mock import patch
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(2, len(panel.plan_items))
-        preserved_ids = [item["record_id"] for item in panel.plan_items]
+        self.assertEqual(2, len(panel._plan_store.list_items()))
+        preserved_ids = [item["record_id"] for item in panel._plan_store.list_items()]
         self.assertEqual(original_ids, preserved_ids)
 
     def test_execute_partial_failure_attempts_atomic_rollback(self):
@@ -1595,7 +1595,7 @@ class ExecuteFailurePreservesPlanTests(_NoStagePreflightMixin, ManagedPathTestCa
         # so no rollback is attempted (no backup_path from any OK item)
         self.assertFalse(bridge.rollback_called)
         # Plan is preserved on failure
-        self.assertEqual(2, len(panel.plan_items))
+        self.assertEqual(2, len(panel._plan_store.list_items()))
 
     def test_execute_success_clears_plan(self):
         """When all items succeed, plan should be cleared."""
@@ -1613,4 +1613,4 @@ class ExecuteFailurePreservesPlanTests(_NoStagePreflightMixin, ManagedPathTestCa
         with patch.object(QMessageBox, "exec", return_value=QMessageBox.Yes):
             panel.execute_plan()
 
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))

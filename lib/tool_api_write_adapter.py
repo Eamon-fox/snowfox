@@ -18,6 +18,10 @@ from .tool_registry import get_tool_descriptor
 from .tool_api_write_validation import resolve_request_backup_path
 
 
+class RequestBackupError(RuntimeError):
+    """A request snapshot could not be prepared before invoking a write tool."""
+
+
 def prepare_write_tool_kwargs(
     *,
     yaml_path: str,
@@ -41,13 +45,16 @@ def prepare_write_tool_kwargs(
     if normalized_mode is not None:
         tool_kwargs["execution_mode"] = normalized_mode
 
-    resolved_backup = resolve_request_backup_path(
-        yaml_path=yaml_path,
-        execution_mode=normalized_mode,
-        dry_run=dry_run_flag,
-        request_backup_path=request_backup_path,
-        backup_event_source=backup_event_source,
-    )
+    try:
+        resolved_backup = resolve_request_backup_path(
+            yaml_path=yaml_path,
+            execution_mode=normalized_mode,
+            dry_run=dry_run_flag,
+            request_backup_path=request_backup_path,
+            backup_event_source=backup_event_source,
+        )
+    except (OSError, RuntimeError) as exc:
+        raise RequestBackupError(f"Failed to create request backup: {exc}") from exc
     if resolved_backup:
         tool_kwargs["request_backup_path"] = resolved_backup
         tool_kwargs["auto_backup"] = False

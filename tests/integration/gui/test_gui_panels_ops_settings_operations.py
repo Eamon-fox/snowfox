@@ -326,8 +326,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
 
         panel.on_record_takeout()
 
-        self.assertEqual(1, len(panel.plan_items))
-        item = panel.plan_items[0]
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        item = panel._plan_store.list_items()[0]
         self.assertEqual(13, item.get("position"))
         self.assertEqual(13, (item.get("payload") or {}).get("position"))
 
@@ -348,8 +348,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
 
         panel.on_add_entry()
 
-        self.assertEqual(1, len(panel.plan_items))
-        item = panel.plan_items[0]
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        item = panel._plan_store.list_items()[0]
         self.assertEqual("add", item["action"])
         self.assertEqual([30, 31, 32, 35], item["payload"]["positions"])
         self.assertEqual("K562_clone12", item["payload"]["fields"].get("short_name"))
@@ -668,8 +668,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         panel.add_plan_items([_make_takeout_item(record_id=1, position=1)])
         panel.add_plan_items([build_rollback_plan_item(backup_path="/tmp/backup_a.bak", source="tests")])
 
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual("rollback", panel.plan_items[0].get("action"))
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual("rollback", panel._plan_store.list_items()[0].get("action"))
         self.assertIn(
             tr("operations.planRollbackReplaced", count=1),
             [str(msg) for msg in messages],
@@ -685,8 +685,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         panel.add_plan_items([_make_takeout_item(record_id=1, position=1)])
         panel.add_plan_items([build_rollback_plan_item(backup_path="", source="tests")])
 
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual("takeout", panel.plan_items[0].get("action"))
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual("takeout", panel._plan_store.list_items()[0].get("action"))
         reject_prefix = tr("operations.planRejected", error="").strip()
         self.assertTrue(
             any(
@@ -725,8 +725,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         panel.m_to_position.setText("8")
         panel.on_record_move()
 
-        self.assertEqual(1, len(panel.plan_items))
-        item = panel.plan_items[0]
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        item = panel._plan_store.list_items()[0]
         self.assertEqual("move", item["action"])
         self.assertEqual(8, item["to_position"])
         self.assertEqual(5, item["position"])
@@ -750,7 +750,7 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         panel.m_to_position.setText("8")
         panel.on_record_move()
 
-        self.assertEqual([], panel.plan_items)
+        self.assertEqual([], panel._plan_store.list_items())
         self.assertTrue(messages)
         self.assertIn(tr("operations.positionRequired"), messages[-1])
 
@@ -761,7 +761,7 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
 
         panel.on_record_takeout()
 
-        self.assertEqual([], panel.plan_items)
+        self.assertEqual([], panel._plan_store.list_items())
         self.assertTrue(messages)
         self.assertIn(tr("operations.positionRequired"), messages[-1])
 
@@ -779,8 +779,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
 
         panel.on_batch_move()
 
-        self.assertEqual(1, len(panel.plan_items))
-        item = panel.plan_items[0]
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        item = panel._plan_store.list_items()[0]
         self.assertEqual("move", item["action"])
         self.assertEqual(12, item["record_id"])
         self.assertEqual(23, item["position"])
@@ -1111,8 +1111,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         panel.m_to_position.setText("10")
         panel.on_record_move()
 
-        self.assertEqual(1, len(panel.plan_items))
-        self.assertEqual(19, panel.plan_items[0]["record_id"])
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        self.assertEqual(19, panel._plan_store.list_items()[0]["record_id"])
 
     def test_operations_panel_batch_section_collapsed_by_default(self):
         panel = self._new_operations_panel()
@@ -1136,7 +1136,7 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
         from unittest.mock import patch
 
         with patch(
-            "app_gui.ui.operations_panel.QFileDialog.getSaveFileName",
+            "app_gui.ui.operations_panel_actions.QFileDialog.getSaveFileName",
             return_value=("/tmp/full_export", "CSV Files (*.csv)"),
         ):
             panel.on_export_inventory_csv()
@@ -1256,8 +1256,8 @@ class GuiPanelsOperationsTests(GuiPanelsBaseCase):
             panel.t_action.setCurrentIndex(action_idx)
         panel.on_record_takeout()
 
-        self.assertEqual(1, len(panel.plan_items))
-        item = panel.plan_items[0]
+        self.assertEqual(1, len(panel._plan_store.list_items()))
+        item = panel._plan_store.list_items()[0]
         self.assertEqual("takeout", item["action"])
         self.assertEqual(2, item["box"])
         self.assertEqual(10, item["position"])

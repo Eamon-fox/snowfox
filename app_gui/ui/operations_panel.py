@@ -2,11 +2,11 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, Signal, Slot, QDate, QSortFilterProxyModel, QEvent, QSignalBlocker, QTimer
-from PySide6.QtGui import QDesktopServices, QValidator, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QValidator, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QComboBox, QCompleter,
-    QStackedWidget, QFileDialog, QMenu,
+    QStackedWidget,
     QDateEdit, QSpinBox, QDoubleSpinBox, QTextBrowser,
     QSizePolicy,
 )
@@ -32,25 +32,6 @@ from app_gui.ui import operations_panel_context as _ops_context
 from app_gui.ui import operations_panel_staging as _ops_staging
 from app_gui.ui import operations_panel_plan_toolbar as _ops_plan_toolbar
 from app_gui.ui.operations_panel_staged_add_lock import StagedAddLockController
-
-# Keep these Qt symbols imported here as stable monkeypatch targets used by
-# operations_panel_actions and related tests.
-_MONKEYPATCH_EXPORTS = (QDesktopServices, QFileDialog, QMenu)
-
-_ACTION_I18N_KEY = {
-    "takeout": "overview.takeout",
-    "move": "operations.move",
-    "add": "operations.add",
-    "edit": "operations.edit",
-    "rollback": "operations.rollback",
-}
-
-
-def _localized_action(action: str) -> str:
-    """Return localized display text for a canonical action name."""
-    key = _ACTION_I18N_KEY.get(action.lower())
-    return tr(key) if key else action.capitalize()
-
 
 class _PrefixListValidator(QValidator):
     """Allow only prefixes/exact values from a finite option list."""
@@ -166,11 +147,6 @@ class OperationsPanel(QWidget):
         # is loaded from disk.
         self.apply_meta_update({"custom_fields": []}, inventory=[])
         self._apply_migration_mode_ui_state()
-
-    @property
-    def plan_items(self):
-        """Read-only snapshot for backward compatibility (tests, external reads)."""
-        return self._plan_store.list_items()
 
     # Staged add-draft form-lock is coordinated by ``StagedAddLockController``.
     # These thin wrappers keep the panel-level call surface stable for
@@ -1258,6 +1234,7 @@ class OperationsPanel(QWidget):
     def _on_plan_table_selection_changed(self, *_args):
         _ops_plan_toolbar._refresh_plan_toolbar_state(self)
         self._sync_plan_table_add_prefill_lock()
+        _ops_plan_table._refresh_plan_detail(self)
 
     # Stable public API: these wrappers keep the call surface fixed while the
     # implementation lives in extracted helper modules.

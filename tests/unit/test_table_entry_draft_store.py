@@ -42,7 +42,6 @@ def _make_store(*, meta=None, records=None, plan_items=None):
     store.set_field_context(
         meta=meta or {"custom_fields": [{"key": "cell_line", "type": "str"}]},
         records=records or [],
-        layout={},
     )
     if plan_items is not None:
         store.set_plan_store(FakePlanStore(plan_items))
@@ -132,6 +131,24 @@ class TestStagedQueries:
     def test_no_plan_store(self):
         store = _make_store()
         assert store.staged_slot_map() == {}
+
+    def test_plan_read_failure_is_not_an_empty_plan_and_preserves_drafts(self):
+        from unittest.mock import Mock
+
+        store = _make_store()
+        store.set_draft((1, 2), {"cell_line": "HeLa"})
+        failure = RuntimeError("plan read failed")
+        store.set_plan_store(Mock(list_items=Mock(side_effect=failure)))
+        with pytest.raises(RuntimeError) as raised:
+            store.reconcile_with_staged()
+        assert raised.value is failure
+        assert store.get_draft((1, 2)) == {"cell_line": "HeLa"}
+
+    def test_bound_store_must_implement_plan_reader(self):
+        store = _make_store()
+        store.set_plan_store(object())
+        with pytest.raises(AttributeError):
+            store.staged_slot_map()
 
     def test_get_staged(self):
         item = _add_plan_item(box=1, positions=(2,), fields={"cell_line": "K562"})

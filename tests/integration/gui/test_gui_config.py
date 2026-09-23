@@ -45,7 +45,7 @@ class GuiConfigTests(unittest.TestCase):
 
         self.assertIsNone(cfg["data_root"])
         self.assertEqual("deepseek", cfg["ai"]["provider"])
-        self.assertEqual("deepseek-v4-flash", cfg["ai"]["model"])
+        self.assertEqual("deepseek-flash", cfg["ai"]["model"])
         self.assertEqual(DEFAULT_MAX_STEPS, cfg["ai"]["max_steps"])
         self.assertTrue(cfg["ai"]["thinking_enabled"])
         self.assertEqual(False, cfg["open_api"]["enabled"])
@@ -63,23 +63,23 @@ ai:
             )
             cfg = load_gui_config(path=str(config_path))
 
-        self.assertEqual("deepseek-v4-flash", cfg["ai"]["model"])
+        self.assertEqual("deepseek-flash", cfg["ai"]["model"])
         self.assertEqual(DEFAULT_MAX_STEPS, cfg["ai"]["max_steps"])
         self.assertTrue(cfg["ai"]["thinking_enabled"])
 
     def test_load_gui_config_migrates_obsolete_deepseek_model(self):
-        with tempfile.TemporaryDirectory(prefix="ln2_gui_cfg_deepseek_legacy_") as temp_dir:
-            config_path = Path(temp_dir) / "config.yaml"
-            config_path.write_text(
-                """ai:
-  provider: deepseek
-  model: deepseek-chat
-""",
-                encoding="utf-8",
-            )
-            cfg = load_gui_config(path=str(config_path))
+        for model in ("deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"):
+            with self.subTest(model=model), tempfile.TemporaryDirectory(prefix="ln2_gui_cfg_deepseek_legacy_") as temp_dir:
+                config_path = Path(temp_dir) / "config.yaml"
+                config_path.write_text(f"ai:\n  provider: deepseek\n  model: {model}\n", encoding="utf-8")
+                cfg = load_gui_config(path=str(config_path))
+                self.assertEqual("deepseek-flash", cfg["ai"]["model"])
 
-        self.assertEqual("deepseek-v4-flash", cfg["ai"]["model"])
+    def test_load_gui_config_keeps_deepseek_pro(self):
+        with tempfile.TemporaryDirectory(prefix="snowfox_pro_") as temp_dir:
+            path = str(Path(temp_dir) / "config.yaml")
+            save_gui_config({"ai": {"provider": "deepseek", "model": "deepseek-v4-pro"}}, path=path)
+            self.assertEqual("deepseek-v4-pro", load_gui_config(path=path)["ai"]["model"])
 
     def test_load_gui_config_migrates_obsolete_zhipu_glm_5_model(self):
         with tempfile.TemporaryDirectory(prefix="ln2_gui_cfg_zhipu_legacy_") as temp_dir:
@@ -93,7 +93,7 @@ ai:
             )
             cfg = load_gui_config(path=str(config_path))
 
-        self.assertEqual("glm-5.2", cfg["ai"]["model"])
+        self.assertEqual("glm-5.3", cfg["ai"]["model"])
 
     def test_load_gui_config_migrates_obsolete_zhipu_glm_5_1_model(self):
         with tempfile.TemporaryDirectory(prefix="ln2_gui_cfg_zhipu_legacy_5_1_") as temp_dir:
@@ -107,7 +107,16 @@ ai:
             )
             cfg = load_gui_config(path=str(config_path))
 
-        self.assertEqual("glm-5.2", cfg["ai"]["model"])
+        self.assertEqual("glm-5.3", cfg["ai"]["model"])
+
+    def test_load_gui_config_upgrades_glm_5_2_and_preserves_other_choices(self):
+        for model, expected in (("glm-5.2", "glm-5.3"), ("glm-4.7", "glm-4.7"), ("custom-glm", "custom-glm")):
+            with self.subTest(model=model), tempfile.TemporaryDirectory(prefix="snowfox_glm_") as temp_dir:
+                path = str(Path(temp_dir) / "config.yaml")
+                save_gui_config({"ai": {"provider": "zhipu", "model": model, "thinking_enabled": False}}, path=path)
+                ai = load_gui_config(path=path)["ai"]
+                self.assertEqual(expected, ai["model"])
+                self.assertFalse(ai["thinking_enabled"])
 
     def test_load_gui_config_migrates_removed_minimax_models(self):
         with tempfile.TemporaryDirectory(prefix="ln2_gui_cfg_minimax_legacy_") as temp_dir:
@@ -158,7 +167,7 @@ ai:
                 "data_root": "/tmp/snowfox-data",
                 "yaml_path": "/tmp/inventory.yaml",
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "max_steps": 12,
                 },
             }
@@ -166,7 +175,7 @@ ai:
             cfg = load_gui_config(path=str(config_path))
 
         self.assertEqual(os.path.abspath("/tmp/snowfox-data"), cfg["data_root"])
-        self.assertEqual("deepseek-v4-flash", cfg["ai"]["model"])
+        self.assertEqual("deepseek-flash", cfg["ai"]["model"])
         self.assertEqual(12, cfg["ai"]["max_steps"])
         self.assertTrue(cfg["ai"]["thinking_enabled"])
 
@@ -198,7 +207,7 @@ ai:
             config_path = Path(temp_dir) / "config.yaml"
             config_path.write_text(
                 """ai:
-  model: deepseek-v4-flash
+  model: deepseek-flash
   mock: true
   max_steps: 5
 """,
@@ -206,7 +215,7 @@ ai:
             )
             cfg = load_gui_config(path=str(config_path))
 
-        self.assertEqual("deepseek-v4-flash", cfg["ai"]["model"])
+        self.assertEqual("deepseek-flash", cfg["ai"]["model"])
         self.assertEqual(5, cfg["ai"]["max_steps"])
         self.assertTrue(cfg["ai"]["thinking_enabled"])
         self.assertNotIn("mock", cfg["ai"])
@@ -216,7 +225,7 @@ ai:
             config_path = Path(temp_dir) / "config.yaml"
             source = {
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "max_steps": 8,
                     "thinking_enabled": False,
                 },
@@ -263,7 +272,7 @@ class ApiKeysConfigTests(unittest.TestCase):
                     "zhipu": "glm-zhipu-456",
                 },
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "max_steps": 8,
                 },
             }
@@ -288,7 +297,7 @@ class CustomPromptConfigTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.yaml"
             source = {
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "custom_prompt": "请用中文回答",
                 },
             }
@@ -303,7 +312,7 @@ class CustomPromptConfigTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.yaml"
             config_path.write_text(
                 """ai:
-  model: deepseek-v4-flash
+  model: deepseek-flash
   max_steps: 5
 """,
                 encoding="utf-8",
@@ -321,7 +330,7 @@ class CustomPromptConfigTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.yaml"
             source = {
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "custom_prompt": "my own instructions",
                 },
             }
@@ -342,7 +351,7 @@ class CustomPromptConfigTests(unittest.TestCase):
             initial = {
                 "yaml_path": "/tmp/demo.yaml",
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "max_steps": 12,
                     "thinking_enabled": True,
                     "custom_prompt": "请用中文回答",
@@ -371,7 +380,7 @@ class CustomPromptConfigTests(unittest.TestCase):
             config_path = Path(temp_dir) / "config.yaml"
             initial = {
                 "ai": {
-                    "model": "deepseek-v4-flash",
+                    "model": "deepseek-flash",
                     "custom_prompt": "my instructions",
                 },
             }

@@ -1,8 +1,8 @@
 """Filter collaborator for OverviewPanel.
 
 ``OverviewFilterController`` owns the grid/table filtering behavior and column
-filter dialogs. Filter configuration and caches live on the panel (grid/table
-rendering and tests read them directly), so this controller is stateless glue
+filter dialogs. Filter configuration and caches live in OverviewQueryState;
+this controller coordinates query state and widgets as stateless glue
 that drives the panel through its ``_p`` reference. Calls to ``_apply_filters``
 route through the panel so tests can patch it on the panel instance.
 """
@@ -15,10 +15,10 @@ from PySide6.QtWidgets import QDialog
 from app_gui.error_localizer import localize_error_payload
 from app_gui.i18n import tr, t
 from app_gui.ui.icons import get_icon, Icons
+from app_gui.ui.overview_panel_widgets import _ColumnFilterDialog
+from app_gui.ui.overview_table_query import query_current_rows, TABLE_ROW_LIMIT
 from lib.overview_table_query import (
     detect_overview_table_column_type,
-    get_unique_overview_table_values,
-    match_overview_table_column_filter,
 )
 
 
@@ -126,8 +126,8 @@ class OverviewFilterController:
 
         p._prune_empty_multi_selection()
 
-        if p.overview_selected_key:
-            selected_button = p.overview_cells.get(p.overview_selected_key)
+        if p._selection.active:
+            selected_button = p.overview_cells.get(p._selection.active)
             if selected_button and selected_button.isHidden():
                 p._clear_selected_cell()
                 p._reset_detail()
@@ -141,21 +141,36 @@ class OverviewFilterController:
             )
         )
 
+    def query_table_rows(self, *, keyword, selected_box, selected_cell):
+        p = self._p
+        if p._table_include_inactive:
+            return p.bridge.filter_records(
+                yaml_path=p.yaml_path_getter(), keyword=keyword, box=selected_box,
+                color_value=selected_cell, include_inactive=True,
+                column_filters=p._query_state.active_column_filters(include_inactive=True),
+                sort_by=p._query_state.sort_by, sort_order=p._query_state.sort_order,
+                limit=TABLE_ROW_LIMIT, offset=0,
+            )
+        return query_current_rows(
+            records=p._current_records, meta=p._current_meta, layout=p._current_layout,
+            state=p._query_state, resolve_rows=p._draft_store.resolve_rows,
+            keyword=keyword, box=selected_box, color_value=selected_cell,
+        )
+
     def _apply_filters_table(self, keyword, selected_box, selected_cell):
         p = self._p
-        response = p._query_table_rows(
+        response = self.query_table_rows(
             keyword=keyword,
             selected_box=selected_box,
             selected_cell=selected_cell,
         )
         if (not isinstance(response, dict) or not response.get("ok")) and str(
-            getattr(p, "_table_sort_by", "") or ""
+            p._query_state.sort_by or ""
         ) != "location":
-            message = str((response or {}).get("message") or "")
-            if "sort_by must be one of:" in message:
-                p._table_sort_by = "location"
-                p._table_sort_order = "asc"
-                response = p._query_table_rows(
+            details = (response or {}).get("details") or {}
+            if details.get("field") == "sort_by":
+                p._query_state.reset_sort()
+                response = self.query_table_rows(
                     keyword=keyword,
                     selected_box=selected_box,
                     selected_cell=selected_cell,
@@ -167,7 +182,7 @@ class OverviewFilterController:
             p._table_data_columns = []
             p._table_header_labels = {}
             p._table_column_types = {}
-            p._table_version = int(getattr(p, "_table_version", 0) or 0) + 1
+            p._query_state.invalidate_rows()
             if hasattr(p, "ov_table"):
                 p.ov_table.setRowCount(0)
                 p.ov_table.setColumnCount(0)
@@ -200,13 +215,12 @@ class OverviewFilterController:
             p._table_header_labels = dict(header_labels)
         p._table_column_types = dict(result.get("column_types") or {})
         p._table_rows = list(result.get("rows") or [])
-        p._table_version = int(getattr(p, "_table_version", 0) or 0) + 1
-        p._column_unique_cache = {}
+        p._query_state.invalidate_rows()
 
         applied_filters = dict(result.get("applied_filters") or {})
-        p._table_sort_by = str(applied_filters.get("sort_by") or getattr(p, "_table_sort_by", "location"))
-        p._table_sort_order = str(
-            applied_filters.get("sort_order") or getattr(p, "_table_sort_order", "asc")
+        p._query_state.sort_by = str(applied_filters.get("sort_by") or p._query_state.sort_by)
+        p._query_state.sort_order = str(
+            applied_filters.get("sort_order") or p._query_state.sort_order
         )
 
         p._render_table_rows(p._table_rows)
@@ -224,7 +238,7 @@ class OverviewFilterController:
             )
         ]
 
-        active_column_filters = p._active_table_column_filters()
+        active_column_filters = p._query_state.active_column_filters(include_inactive=p._table_include_inactive)
         if active_column_filters:
             active_filters = len(active_column_filters)
             status_parts.append(tr("overview.activeFilters").format(count=active_filters))
@@ -256,7 +270,7 @@ class OverviewFilterController:
         if p.ov_filter_toggle_btn.isChecked():
             p.ov_filter_toggle_btn.setChecked(False)
 
-        p._column_filters.clear()
+        p._query_state.column_filters.clear()
         if hasattr(p, "ov_table_header"):
             for i in range(p.ov_table.columnCount()):
                 p.ov_table_header.set_column_filtered(i, False)
@@ -264,8 +278,6 @@ class OverviewFilterController:
 
     def _on_column_filter_clicked(self, column_index, column_name):
         """Handle filter icon click on a column header."""
-        from app_gui.ui import overview_panel as _ov_panel
-
         p = self._p
         columns = list(getattr(p, "_table_columns", []) or [])
         if column_index < 0 or column_index >= len(columns):
@@ -284,9 +296,9 @@ class OverviewFilterController:
         if filter_type in ("list", "number"):
             unique_values = self._get_unique_column_values(logical_column_name)
 
-        current_filter = p._column_filters.get(logical_column_name)
+        current_filter = p._query_state.column_filters.get(logical_column_name)
 
-        dialog = _ov_panel._ColumnFilterDialog(
+        dialog = _ColumnFilterDialog(
             p,
             display_column_name,
             filter_type,
@@ -298,15 +310,15 @@ class OverviewFilterController:
             filter_config = dialog.get_filter_config()
 
             if filter_config:
-                p._column_filters[logical_column_name] = filter_config
+                p._query_state.column_filters[logical_column_name] = filter_config
                 p.ov_table_header.set_column_filtered(column_index, True)
             else:
-                p._column_filters.pop(logical_column_name, None)
+                p._query_state.column_filters.pop(logical_column_name, None)
                 p.ov_table_header.set_column_filtered(column_index, False)
 
             p._apply_filters()
         elif dialog.filter_config == {}:
-            p._column_filters.pop(logical_column_name, None)
+            p._query_state.column_filters.pop(logical_column_name, None)
             p.ov_table_header.set_column_filtered(column_index, False)
             p._apply_filters()
 
@@ -326,32 +338,4 @@ class OverviewFilterController:
     def _get_unique_column_values(self, column_name):
         """Get unique values and their counts for a column."""
         p = self._p
-        table_version = int(getattr(p, "_table_version", 0) or 0)
-        cache_key = (str(column_name or ""), table_version)
-        cache = getattr(p, "_column_unique_cache", None)
-        if not isinstance(cache, dict):
-            cache = {}
-            p._column_unique_cache = cache
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return list(cached)
-
-        sorted_values = get_unique_overview_table_values(
-            getattr(p, "_table_rows", []) or [],
-            column_name,
-        )
-
-        cache[cache_key] = list(sorted_values)
-        return sorted_values
-
-    def _match_column_filter(self, row_data, column_name, filter_config):
-        """Check if a row matches a column filter."""
-        if isinstance(filter_config, dict) and str(filter_config.get("type") or "") == "list":
-            values = list(filter_config.get("values") or [])
-            values_sig = tuple(str(v) for v in values)
-            values_set = filter_config.get("_values_set")
-            if (not isinstance(values_set, set)) or filter_config.get("_values_sig") != values_sig:
-                values_set = set(values_sig)
-                filter_config["_values_set"] = values_set
-                filter_config["_values_sig"] = values_sig
-        return match_overview_table_column_filter(row_data, column_name, filter_config)
+        return p._query_state.unique_values(column_name, p._table_rows)

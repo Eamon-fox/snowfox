@@ -71,8 +71,8 @@
     --cell-occupied-hairline: rgba(255,255,255,0.10);
     --groupbox-bg: #1f2f43;
     --groupbox-border: rgba(230,241,255,0.20);
-    --scrollbar-handle: rgba(255,255,255,0.1);
-    --scrollbar-handle-hover: rgba(255,255,255,0.15);
+    --scrollbar-handle: rgba(255,255,255,0.25);
+    --scrollbar-handle-hover: rgba(255,255,255,0.4);
     --splitter-color: rgba(159,179,200,0.18);
     --splitter-hover: rgba(99,179,255,0.42);
     --overview-bg: #112033;
@@ -82,7 +82,7 @@
     --surface-border-subtle: rgba(255,255,255,0.08);
     --surface-border-strong: rgba(255,255,255,0.16);
     --input-focus-bg: var(--background-base);
-    --primary-btn-text: #ffffff;
+    --primary-btn-text: #0f1724;
     --toggle-checked-text: #000000;
     --toggle-unchecked-text: #ffffff;
     --quick-prompt-bg: rgba(99,179,255,0.16);

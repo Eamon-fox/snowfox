@@ -505,19 +505,19 @@ class OverviewTableViewTests(ManagedPathTestCase):
         return None
 
     def _table_row_kind(self, panel, row):
-        from app_gui.ui.overview_panel import TABLE_ROW_KIND_ROLE
+        from app_gui.ui.overview_table_roles import TABLE_ROW_KIND_ROLE
 
         item = self._table_row_item(panel, row)
         return str(item.data(TABLE_ROW_KIND_ROLE) or "") if item is not None else ""
 
     def _table_row_confirmed(self, panel, row):
-        from app_gui.ui.overview_panel import TABLE_ROW_CONFIRMED_ROLE
+        from app_gui.ui.overview_table_roles import TABLE_ROW_CONFIRMED_ROLE
 
         item = self._table_row_item(panel, row)
         return bool(item.data(TABLE_ROW_CONFIRMED_ROLE)) if item is not None else False
 
     def _table_row_locked(self, panel, row):
-        from app_gui.ui.overview_panel import TABLE_ROW_LOCKED_ROLE
+        from app_gui.ui.overview_table_roles import TABLE_ROW_LOCKED_ROLE
 
         item = self._table_row_item(panel, row)
         return bool(item.data(TABLE_ROW_LOCKED_ROLE)) if item is not None else False
@@ -533,7 +533,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
         )
 
     def _table_find_row(self, panel, *, row_kind=None, record_id=None, box=None, position=None):
-        from app_gui.ui.overview_panel import TABLE_ROW_BOX_ROLE, TABLE_ROW_POSITION_ROLE
+        from app_gui.ui.overview_table_roles import TABLE_ROW_BOX_ROLE, TABLE_ROW_POSITION_ROLE
 
         id_column = None
         if record_id is not None:
@@ -697,7 +697,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
             self.assertEqual(500, panel.ov_table.rowCount())
             self.assertEqual(500, self._table_row_count(panel, row_kind="empty_slot"))
 
-            response = panel._query_table_rows(keyword="", selected_box=None, selected_cell=None)
+            response = panel._filters.query_table_rows(keyword="", selected_box=None, selected_cell=None)
             self.assertTrue(response["ok"])
             result = response["result"]
             self.assertEqual(800, result["total_count"])
@@ -888,7 +888,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 def get_filter_config(self):
                     return dict(self.filter_config)
 
-            with patch("app_gui.ui.overview_panel._ColumnFilterDialog", _FakeDialog), patch.object(
+            with patch("app_gui.ui.overview_panel_filters._ColumnFilterDialog", _FakeDialog), patch.object(
                 panel,
                 "_apply_filters",
             ) as apply_mock:
@@ -897,8 +897,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
             self.assertEqual("History Events", captured.get("column_name"))
             self.assertEqual("text", captured.get("filter_type"))
             self.assertIsNone(captured.get("unique_values"))
-            self.assertEqual({"type": "text", "text": "takeout"}, panel._column_filters.get("thaw_events"))
-            self.assertNotIn("History Events", panel._column_filters)
+            self.assertEqual({"type": "text", "text": "takeout"}, panel._query_state.column_filters.get("thaw_events"))
+            self.assertNotIn("History Events", panel._query_state.column_filters)
             apply_mock.assert_called_once()
         finally:
             self._cleanup(tmpdir)
@@ -958,7 +958,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 def get_filter_config(self):
                     return dict(self.filter_config)
 
-            with patch("app_gui.ui.overview_panel._ColumnFilterDialog", _FakeDialog), patch.object(
+            with patch("app_gui.ui.overview_panel_filters._ColumnFilterDialog", _FakeDialog), patch.object(
                 panel,
                 "_apply_filters",
             ) as apply_mock:
@@ -967,8 +967,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
             self.assertEqual("Sample Tag", captured.get("column_name"))
             self.assertEqual("list", captured.get("filter_type"))
             self.assertIn(("Alpha", 1), captured.get("unique_values"))
-            self.assertEqual({"type": "list", "values": ["Alpha"]}, panel._column_filters.get("sample_tag"))
-            self.assertNotIn("Sample Tag", panel._column_filters)
+            self.assertEqual({"type": "list", "values": ["Alpha"]}, panel._query_state.column_filters.get("sample_tag"))
+            self.assertNotIn("Sample Tag", panel._query_state.column_filters)
             apply_mock.assert_called_once()
         finally:
             self._cleanup(tmpdir)
@@ -1191,18 +1191,76 @@ class OverviewTableViewTests(ManagedPathTestCase):
 
             location_col = self._table_column_index(panel, "location")
 
-            panel.ov_table.sortItems(location_col, Qt.DescendingOrder)
+            panel.ov_table_header.setSortIndicator(location_col, Qt.DescendingOrder)
             self.assertEqual(
                 ["Box 1 Position 10", "Box 1 Position 2", "Box 1 Position 1"],
                 self._table_column_texts(panel, "location", row_kind="active"),
             )
 
-            panel.ov_table.sortItems(location_col, Qt.AscendingOrder)
+            panel.ov_table_header.setSortIndicator(location_col, Qt.AscendingOrder)
             self.assertEqual(
                 ["Box 1 Position 1", "Box 1 Position 2", "Box 1 Position 10"],
                 self._table_column_texts(panel, "location", row_kind="active"),
             )
         finally:
+            self._cleanup(tmpdir)
+
+    def test_header_sort_queries_all_rows_before_applying_display_limit(self):
+        records = [
+            {"id": i, "cell_line": "K562", "box": (i - 1) // 81 + 1,
+             "position": (i - 1) % 81 + 1, "stored_at": "2025-01-01"}
+            for i in range(1, 502)
+        ]
+        yaml_path, tmpdir = self._seed_yaml(records, meta_extra={
+            "box_layout": {"rows": 9, "cols": 9, "box_numbers": list(range(1, 8))},
+        })
+        try:
+            from app_gui.tool_bridge import GuiToolBridge
+
+            panel = OverviewPanel(bridge=GuiToolBridge(), yaml_path_getter=lambda: yaml_path)
+            panel.refresh()
+            self._switch_to_table(panel)
+            self.assertEqual(500, panel.ov_table.rowCount())
+            id_col = self._table_column_index(panel, "id")
+            panel.ov_table_header.setSortIndicator(id_col, Qt.DescendingOrder)
+            self.assertEqual("501", panel.ov_table.item(0, id_col).text())
+            self.assertEqual("2", panel.ov_table.item(499, id_col).text())
+            self.assertFalse(panel.ov_table.isSortingEnabled())
+            self.assertEqual(501, panel._table_rows[0]["record_id"])
+        finally:
+            self._cleanup(tmpdir)
+
+    def test_header_click_keeps_numeric_nulls_last_in_both_directions(self):
+        records = [
+            {"id": i, "box": 1, "position": i, "passage": value, "stored_at": "2025-01-01"}
+            for i, value in enumerate((2, None, 10, 0), 1)
+        ]
+        yaml_path, tmpdir = self._seed_yaml(records, meta_extra={
+            "custom_fields": [{"key": "passage", "label": "Passage", "type": "int"}],
+        })
+        panel = None
+        try:
+            from app_gui.tool_bridge import GuiToolBridge
+            from PySide6.QtCore import QPoint
+
+            panel = OverviewPanel(bridge=GuiToolBridge(), yaml_path_getter=lambda: yaml_path)
+            panel.resize(1200, 700)
+            panel.show()
+            panel.refresh()
+            self._switch_to_table(panel)
+            column = self._table_column_index(panel, "passage")
+            header = panel.ov_table_header
+            header.setSortIndicator(column, Qt.AscendingOrder)
+            self.assertEqual(["0", "2", "10", ""], self._table_column_texts(panel, "passage", row_kind="active"))
+            panel.ov_table.scrollToItem(panel.ov_table.item(0, column))
+            self._app.processEvents()
+            point = QPoint(header.sectionViewportPosition(column) + 16, header.height() // 2)
+            QTest.mouseClick(header.viewport(), Qt.LeftButton, pos=point)
+            self.assertEqual("desc", panel._query_state.sort_order)
+            self.assertEqual(["10", "2", "0", ""], self._table_column_texts(panel, "passage", row_kind="active"))
+        finally:
+            if panel is not None:
+                panel.hide()
             self._cleanup(tmpdir)
 
     def test_table_location_display_includes_box_tag_when_available(self):
@@ -1262,6 +1320,34 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 panel.hide()
             self._cleanup(tmpdir)
 
+    def test_removed_sort_column_recovers_without_parsing_error_text(self):
+        records = [{"id": 1, "cell_line": "K562", "box": 1, "position": 1, "stored_at": "2025-01-01"}]
+        yaml_path, tmpdir = self._seed_yaml(records)
+        try:
+            from app_gui.tool_bridge import GuiToolBridge
+
+            bridge = GuiToolBridge()
+            panel = OverviewPanel(bridge=bridge, yaml_path_getter=lambda: yaml_path)
+            panel.refresh()
+            self._switch_to_table(panel)
+            panel.ov_filter_secondary_toggle.setChecked(True)
+            panel._query_state.sort_by = "removed_field"
+            original_query = bridge.filter_records
+
+            def localized_query(*args, **kwargs):
+                response = original_query(*args, **kwargs)
+                if not response["ok"]:
+                    response["message"] = "排序字段已删除"
+                return response
+
+            with patch.object(bridge, "filter_records", side_effect=localized_query) as query:
+                panel._apply_filters()
+            self.assertEqual(2, query.call_count)
+            self.assertEqual("location", panel._query_state.sort_by)
+            self.assertEqual(["1"], self._table_column_texts(panel, "id", row_kind="active"))
+        finally:
+            self._cleanup(tmpdir)
+
     def test_table_id_sort_uses_numeric_order(self):
         records = [
             {"id": 10, "cell_line": "K562", "short_name": "ten", "box": 1, "position": 1, "frozen_at": "2025-01-01"},
@@ -1278,7 +1364,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
 
             id_col = self._table_column_index(panel, "id")
 
-            panel.ov_table.sortItems(id_col, Qt.AscendingOrder)
+            panel.ov_table_header.setSortIndicator(id_col, Qt.AscendingOrder)
             self.assertEqual(["1", "2", "10"], self._table_column_texts(panel, "id", row_kind="active"))
         finally:
             self._cleanup(tmpdir)
@@ -1306,8 +1392,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 self._click_table_header(panel, "cell_line")
                 self.assertEqual(0, mock_filter.call_count)
 
-            self.assertEqual("cell_line", panel._table_sort_by)
-            self.assertEqual("asc", panel._table_sort_order)
+            self.assertEqual("cell_line", panel._query_state.sort_by)
+            self.assertEqual("asc", panel._query_state.sort_order)
             self.assertEqual(
                 ["aardvark", "Alpha", "beta"],
                 self._table_column_texts(panel, "cell_line", row_kind="active"),
@@ -1339,8 +1425,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
             with patch.object(bridge, "filter_records", wraps=bridge.filter_records) as mock_filter:
                 self._click_table_header(panel, "location")
                 self.assertEqual(0, mock_filter.call_count)
-                self.assertEqual("location", panel._table_sort_by)
-                self.assertEqual("desc", panel._table_sort_order)
+                self.assertEqual("location", panel._query_state.sort_by)
+                self.assertEqual("desc", panel._query_state.sort_order)
                 self.assertEqual(
                     ["Box 1 Position 10", "Box 1 Position 2", "Box 1 Position 1"],
                     self._table_column_texts(panel, "location", row_kind="active"),
@@ -1349,8 +1435,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 self._click_table_header(panel, "location")
                 self.assertEqual(0, mock_filter.call_count)
 
-            self.assertEqual("location", panel._table_sort_by)
-            self.assertEqual("asc", panel._table_sort_order)
+            self.assertEqual("location", panel._query_state.sort_by)
+            self.assertEqual("asc", panel._query_state.sort_order)
             self.assertEqual(
                 ["Box 1 Position 1", "Box 1 Position 2", "Box 1 Position 10"],
                 self._table_column_texts(panel, "location", row_kind="active"),
@@ -1404,7 +1490,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
 
             passage_col = self._table_column_index(panel, "passage_number")
 
-            panel.ov_table.sortItems(passage_col, Qt.AscendingOrder)
+            panel.ov_table_header.setSortIndicator(passage_col, Qt.AscendingOrder)
             self.assertEqual(
                 ["1", "2", "10"],
                 self._table_column_texts(panel, "passage_number", row_kind="active"),
@@ -1463,8 +1549,8 @@ class OverviewTableViewTests(ManagedPathTestCase):
                 self._click_table_header(panel, "passage_number")
                 self.assertEqual(0, mock_filter.call_count)
 
-            self.assertEqual("passage_number", panel._table_sort_by)
-            self.assertEqual("asc", panel._table_sort_order)
+            self.assertEqual("passage_number", panel._query_state.sort_by)
+            self.assertEqual("asc", panel._query_state.sort_order)
             self.assertEqual(
                 ["1", "2", "10"],
                 self._table_column_texts(panel, "passage_number", row_kind="active"),
@@ -1509,7 +1595,7 @@ class OverviewTableViewTests(ManagedPathTestCase):
         finally:
             self._cleanup(tmpdir)
 
-    def test_get_unique_column_values_uses_table_version_cache(self):
+    def test_unique_column_values_cache_is_invalidated_explicitly(self):
         records = [
             {"id": 1, "cell_line": "K562", "short_name": "A", "box": 1, "position": 1, "frozen_at": "2025-01-01"},
             {"id": 2, "cell_line": "HeLa", "short_name": "B", "box": 1, "position": 2, "frozen_at": "2025-01-01"},
@@ -1532,21 +1618,20 @@ class OverviewTableViewTests(ManagedPathTestCase):
                     return super().__iter__()
 
             panel._table_rows = _CountingRows(list(panel._table_rows))
-            panel._table_version = 7
-            panel._column_unique_cache = {}
+            panel._query_state.invalidate_rows()
 
             first = panel._get_unique_column_values("cell_line")
             second = panel._get_unique_column_values("cell_line")
             self.assertEqual(first, second)
             self.assertEqual(1, panel._table_rows.iter_calls)
 
-            panel._table_version = 8
+            panel._query_state.invalidate_rows()
             panel._get_unique_column_values("cell_line")
             self.assertEqual(2, panel._table_rows.iter_calls)
         finally:
             self._cleanup(tmpdir)
 
-    def test_table_filter_requery_bumps_version_and_clears_unique_cache(self):
+    def test_table_filter_requery_refreshes_unique_values(self):
         records = [
             {"id": 1, "cell_line": "K562", "short_name": "A", "box": 1, "position": 1, "frozen_at": "2025-01-01"},
         ]
@@ -1558,12 +1643,9 @@ class OverviewTableViewTests(ManagedPathTestCase):
             panel.refresh()
             self._switch_to_table(panel)
 
-            panel._table_version = 3
-            panel._column_unique_cache = {("cell_line", 3): [("K562", 1)]}
-            panel.ov_filter_keyword.setText("k562")
-
-            self.assertEqual(4, panel._table_version)
-            self.assertEqual({}, panel._column_unique_cache)
+            self.assertEqual([("K562", 1)], panel._get_unique_column_values("cell_line"))
+            panel.ov_filter_keyword.setText("no matching sample")
+            self.assertEqual([], panel._get_unique_column_values("cell_line"))
         finally:
             self._cleanup(tmpdir)
 
@@ -1675,27 +1757,6 @@ class OverviewTableViewTests(ManagedPathTestCase):
                     self.assertIsNot(items_before[r], items_after[r])
                 else:
                     self.assertIs(items_before[r], items_after[r])
-        finally:
-            self._cleanup(tmpdir)
-
-    def test_match_column_filter_list_compiles_value_set(self):
-        records = [
-            {"id": 1, "cell_line": "K562", "short_name": "A", "box": 1, "position": 1, "frozen_at": "2025-01-01"},
-        ]
-        yaml_path, tmpdir = self._seed_yaml(records, meta_extra={"color_key": "cell_line"})
-        try:
-            from app_gui.tool_bridge import GuiToolBridge
-
-            panel = OverviewPanel(bridge=GuiToolBridge(), yaml_path_getter=lambda: yaml_path)
-            row_data = {"values": {"cell_line": "HeLa"}}
-            filter_config = {"type": "list", "values": ["K562", "HeLa"]}
-
-            self.assertTrue(panel._match_column_filter(row_data, "cell_line", filter_config))
-            self.assertEqual({"K562", "HeLa"}, filter_config.get("_values_set"))
-
-            filter_config["values"] = ["A549"]
-            self.assertFalse(panel._match_column_filter(row_data, "cell_line", filter_config))
-            self.assertEqual({"A549"}, filter_config.get("_values_set"))
         finally:
             self._cleanup(tmpdir)
 
@@ -2261,6 +2322,29 @@ class OverviewTableViewTests(ManagedPathTestCase):
             self._app.processEvents()
             empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
             self.assertEqual("+", panel.ov_table.item(empty_row, confirm_col).text())
+
+            # Refresh from disk must preserve the uncommitted draft in the store.
+            panel.refresh()
+            empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
+            self.assertEqual("HeLa", panel.ov_table.item(empty_row, cell_line_col).text())
+            self.assertEqual("+", panel.ov_table.item(empty_row, confirm_col).text())
+            self.assertEqual(0, store.count())
+
+            # Clearing every editable field must clear both the row and its draft.
+            for column in (cell_line_col, frozen_col):
+                empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
+                panel.ov_table.item(empty_row, column).setText("")
+                self._app.processEvents()
+            empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
+            self.assertEqual("", panel.ov_table.item(empty_row, confirm_col).text())
+            self.assertFalse(panel._draft_store.has_draft((1, 2)))
+            panel.refresh()
+            empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
+            self.assertEqual("", panel.ov_table.item(empty_row, cell_line_col).text())
+            self.assertEqual("", panel.ov_table.item(empty_row, confirm_col).text())
+            panel.ov_table.item(empty_row, frozen_col).setText("2026-02-10")
+            empty_row = self._table_find_row(panel, row_kind="empty_slot", box=1, position=2)
+            panel.ov_table.item(empty_row, cell_line_col).setText("HeLa")
 
             # Stage the item with matching values: confirm cell shows checkmark
             store.add(

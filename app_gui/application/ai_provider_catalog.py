@@ -13,10 +13,13 @@ OBSOLETE_AI_MODELS = {
     "deepseek": {
         "deepseek-chat",
         "deepseek-reasoner",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
     },
     "zhipu": {
         "glm-5",
         "glm-5.1",
+        "glm-5.2",
     },
     "minimax": {
         "MiniMax-M2.7",

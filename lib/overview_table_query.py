@@ -14,6 +14,15 @@ from .validation_primitives import safe_int as _safe_int
 from .validators import parse_date
 
 
+class InvalidSortColumn(ValueError):
+    """The requested column is absent from the current table projection."""
+
+    def __init__(self, value, columns):
+        self.value = value
+        self.allowed = list(columns)
+        super().__init__("sort_by must be one of: " + ", ".join(map(str, columns)))
+
+
 _KNOWN_COLUMN_TYPES = {
     "id": "number",
     "frozen_at": "date",
@@ -515,15 +524,51 @@ def query_overview_table(
     limit=None,
     offset=0,
 ):
-    """Execute one shared Overview-table query and return display payload."""
-    projection = build_overview_table_projection(records or [], meta=meta or {})
+    """Query inventory records and expose only the public display-row fields."""
+    result = query_table_projection(
+        build_overview_table_projection(records or [], meta=meta or {}),
+        meta=meta, keyword=keyword, box=box, color_value=color_value,
+        include_inactive=include_inactive, column_filters=column_filters,
+        sort_by=sort_by, sort_order=sort_order, limit=limit, offset=offset,
+    )
+    display_rows = []
+    for row_data in result["rows"]:
+        display_rows.append(
+            {
+                "row_kind": row_data.get("row_kind"),
+                "record_id": row_data.get("record_id"),
+                "box": row_data.get("box"),
+                "position": row_data.get("position"),
+                "active": bool(row_data.get("active")),
+                "color_value": row_data.get("color_value"),
+                "values": dict(row_data.get("values") or {}),
+            }
+        )
+
+    result["rows"] = display_rows
+    return result
+
+
+def query_table_projection(
+    projection,
+    *,
+    meta=None,
+    keyword="",
+    box=None,
+    color_value=None,
+    include_inactive=False,
+    column_filters=None,
+    sort_by="location",
+    sort_order="asc",
+    limit=None,
+    offset=0,
+):
+    """Filter, sort and page a projection while preserving its row metadata."""
     columns = list(projection.get("columns") or [])
 
     normalized_sort_by = str(sort_by or "location").strip() or "location"
     if normalized_sort_by not in {str(column) for column in columns}:
-        raise ValueError(
-            "sort_by must be one of: " + ", ".join(str(column) for column in columns)
-        )
+        raise InvalidSortColumn(normalized_sort_by, columns)
 
     normalized_column_filters = normalize_overview_table_column_filters(
         columns,
@@ -554,28 +599,14 @@ def query_overview_table(
         offset=offset,
     )
 
-    display_rows = []
-    for row_data in paged_rows:
-        display_rows.append(
-            {
-                "row_kind": row_data.get("row_kind"),
-                "record_id": row_data.get("record_id"),
-                "box": row_data.get("box"),
-                "position": row_data.get("position"),
-                "active": bool(row_data.get("active")),
-                "color_value": row_data.get("color_value"),
-                "values": dict(row_data.get("values") or {}),
-            }
-        )
-
     total_count = len(sorted_rows)
-    display_count = len(display_rows)
+    display_count = len(paged_rows)
     has_more = normalized_limit is not None and (normalized_offset + display_count) < total_count
 
     return {
         "columns": columns,
         "column_types": column_types,
-        "rows": display_rows,
+        "rows": paged_rows,
         "color_key": projection.get("color_key"),
         "total_count": total_count,
         "display_count": display_count,

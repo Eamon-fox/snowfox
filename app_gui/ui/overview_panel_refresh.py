@@ -80,12 +80,10 @@ class OverviewRefreshController:
         p = self._p
         p.overview_records_by_id = {}
         p.overview_pos_map = {}
-        p.overview_selected_key = None
-        p.overview_empty_multi_selected_keys = set()
+        p._selection.reset()
         p._current_meta = {}
         p._current_layout = {}
         p._current_records = []
-        p._overview_selection_anchor_key = None
         p._table_rows = []
         p._table_columns = []
         p._table_data_columns = []
@@ -96,7 +94,7 @@ class OverviewRefreshController:
         p._stats_response_cache = {}
         p._last_stats_cache_key = None
         p._cell_render_signatures = {}
-        p._table_version = int(getattr(p, "_table_version", 0) or 0) + 1
+        p._query_state.invalidate_rows()
         if hasattr(p, "ov_table"):
             p.ov_table.setRowCount(0)
             p.ov_table.setColumnCount(0)
@@ -224,9 +222,7 @@ class OverviewRefreshController:
         rows = int(layout.get("rows", 9))
         cols = int(layout.get("cols", 9))
         p._current_layout = layout
-        draft_store = getattr(p, "_draft_store", None)
-        if draft_store is not None:
-            draft_store.set_field_context(p._current_meta, p._current_records, layout)
+        p._draft_store.set_field_context(p._current_meta, p._current_records)
         box_numbers = sorted([int(k) for k in box_stats], key=int)
         if not box_numbers:
             box_count = get_box_count(layout)

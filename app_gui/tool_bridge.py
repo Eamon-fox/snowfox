@@ -3,7 +3,8 @@
 from copy import deepcopy
 
 from app_gui.i18n import tr
-from lib.inventory_paths import assert_allowed_inventory_yaml_path
+from lib.inventory_paths import InventoryPathError, assert_allowed_inventory_yaml_path
+from lib.path_policy import PathPolicyError
 from lib import tool_api_write_adapter as _write_adapter
 from lib.yaml_ops import clear_read_snapshot, current_read_snapshot_id, read_snapshot_context
 from lib.tool_registry import (
@@ -38,17 +39,15 @@ class GuiToolBridge:
         return assert_allowed_inventory_yaml_path(yaml_path, must_exist=must_exist)
 
     @staticmethod
-    def _backup_create_failed(exc):
-        error_code = str(getattr(exc, "code", "") or "backup_create_failed")
-        message = str(getattr(exc, "message", "") or f"Failed to create request backup: {exc}")
+    def _write_preparation_failed(exc):
+        is_path_error = isinstance(exc, PathPolicyError)
         payload = {
             "ok": False,
-            "error_code": error_code,
-            "message": message,
+            "error_code": exc.code if is_path_error else "backup_create_failed",
+            "message": str(exc),
         }
-        resolved_path = str(getattr(exc, "resolved_path", "") or "").strip()
-        if resolved_path:
-            payload["resolved_path"] = resolved_path
+        if is_path_error and exc.resolved_path:
+            payload["resolved_path"] = exc.resolved_path
         return payload
 
     @staticmethod
@@ -97,7 +96,7 @@ class GuiToolBridge:
     def _call_registry_read_tool(self, *, yaml_path, bridge_spec, payload):
         try:
             yaml_path = self._guard_yaml_path(yaml_path, must_exist=True)
-        except Exception as exc:
+        except (InventoryPathError, OSError) as exc:
             return self._path_validation_failed(exc)
 
         tool_fn = self._registry_tool_callable(bridge_spec.tool_api_attr)
@@ -122,7 +121,7 @@ class GuiToolBridge:
     def _call_registry_write_tool(self, *, yaml_path, descriptor, bridge_spec, payload):
         try:
             yaml_path = self._guard_yaml_path(yaml_path, must_exist=True)
-        except Exception as exc:
+        except (InventoryPathError, OSError) as exc:
             return self._path_validation_failed(exc)
 
         call_kwargs = dict(payload or {})
@@ -142,8 +141,8 @@ class GuiToolBridge:
                 backup_event_source="app_gui",
                 payload=call_kwargs,
             )
-        except Exception as exc:
-            return self._backup_create_failed(exc)
+        except (_write_adapter.RequestBackupError, PathPolicyError) as exc:
+            return self._write_preparation_failed(exc)
 
 
 def _install_registry_bridge_methods():

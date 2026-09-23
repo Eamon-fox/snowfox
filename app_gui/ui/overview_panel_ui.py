@@ -280,6 +280,7 @@ def setup_ui(self):
 
     # Table Area
     self.ov_table = QTableWidget()
+    self.ov_table.setObjectName("overviewInventoryTable")
     self.ov_table._overview_panel_owner = self
     self.ov_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
     self.ov_table.verticalHeader().setVisible(False)

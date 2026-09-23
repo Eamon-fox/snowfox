@@ -2,6 +2,7 @@
 
 import os
 
+from app_gui.i18n import tr
 from app_gui.error_localizer import localize_error_payload
 from app_gui.plan_executor import preflight_plan
 from app_gui.ui.plan_item_desc import build_localized_plan_item_desc
@@ -14,12 +15,6 @@ from lib.plan_store import (
     PlanStore,
 )
 
-
-def _tr(key, **kwargs):
-    # Keep tests and monkeypatch points stable on operations_panel.tr.
-    from app_gui.ui import operations_panel as _ops_panel
-
-    return _ops_panel.tr(key, **kwargs)
 
 
 def _plan_item_key(self, item):
@@ -169,13 +164,13 @@ def add_plan_items(self, items):
         _refresh_current_plan_validation(self, trigger="stage_blocked")
         first = blocked_messages[0]
         if replace_with_rollback and existing_items:
-            user_text = _tr(
+            user_text = tr(
                 "operations.planRejectedRollbackKept",
                 error=first,
                 count=len(existing_items),
             )
         else:
-            user_text = _tr("operations.planRejected", error=first)
+            user_text = tr("operations.planRejected", error=first)
         preview = blocked_messages[:3]
         feedback = "\n".join(preview)
         if len(blocked_messages) > 3:
@@ -213,7 +208,7 @@ def add_plan_items(self, items):
         _publish_plan_items_notice(
             self,
             code="plan.stage.replaced_by_rollback",
-            text=_tr("operations.planRollbackReplaced", count=replaced_count),
+            text=tr("operations.planRollbackReplaced", count=replaced_count),
             level="info",
             timeout=2000,
             items=accepted,
@@ -235,13 +230,13 @@ def add_plan_items(self, items):
         _ops_forms._set_plan_feedback(self, "")
 
         if already_staged:
-            notice_text = _tr(
+            notice_text = tr(
                 "operations.planAddedAndAlreadyStaged",
                 added=added,
                 already=already_staged,
             )
         else:
-            notice_text = _tr("operations.planAddedCount", count=added)
+            notice_text = tr("operations.planAddedCount", count=added)
 
         _publish_plan_items_notice(
             self,
@@ -266,7 +261,7 @@ def add_plan_items(self, items):
     _publish_plan_items_notice(
         self,
         code="plan.stage.already_staged",
-        text=_tr("operations.planAlreadyStagedCount", count=already_staged),
+        text=tr("operations.planAlreadyStagedCount", count=already_staged),
         level="info",
         timeout=2000,
         items=noop_items,
@@ -313,12 +308,12 @@ def _update_execute_button_state(self):
     """Enable/disable Execute button based on preflight results."""
     if bool(getattr(self, "_is_write_locked_by_migration_mode", lambda: False)()):
         self.plan_exec_btn.setEnabled(False)
-        self.plan_exec_btn.setText(_tr("operations.executeAll"))
+        self.plan_exec_btn.setText(tr("operations.executeAll"))
         return
     if bool(getattr(self, "_plan_execution_running", False)):
         self.plan_exec_btn.setEnabled(False)
         self.plan_exec_btn.setText(
-            _tr("operations.planExecuting", default="Executing...")
+            tr("operations.planExecuting", default="Executing...")
         )
         return
 
@@ -337,14 +332,14 @@ def _update_execute_button_state(self):
     ):
         self.plan_exec_btn.setEnabled(False)
         self.plan_exec_btn.setText(
-            _tr("operations.executePlanValidating", default="Validating...")
+            tr("operations.executePlanValidating", default="Validating...")
         )
         return
     invalid_count = sum(1 for status in transient_statuses if status == PLAN_VALIDATION_STATUS_INVALID)
     if invalid_count:
         self.plan_exec_btn.setEnabled(False)
         self.plan_exec_btn.setText(
-            _tr("operations.executePlanBlocked", count=invalid_count)
+            tr("operations.executePlanBlocked", count=invalid_count)
         )
         return
 
@@ -353,10 +348,10 @@ def _update_execute_button_state(self):
     if has_blocked:
         blocked_count = sum(1 for v in self._plan_validation_by_key.values() if v.get("blocked"))
         self.plan_exec_btn.setText(
-            _tr("operations.executePlanBlocked", count=blocked_count)
+            tr("operations.executePlanBlocked", count=blocked_count)
         )
     else:
-        self.plan_exec_btn.setText(_tr("operations.executeAll"))
+        self.plan_exec_btn.setText(tr("operations.executeAll"))
 
 
 def remove_plan_items_by_payload(self, payloads):

@@ -258,7 +258,7 @@ def test_settings_flow_apply_and_finalize_updates_runtime_state():
         open_api_enabled=True,
         open_api_port=40123,
         ai_provider="deepseek",
-        ai_model="deepseek-v4-flash",
+        ai_model="deepseek-flash",
         ai_max_steps=9,
         ai_thinking_enabled=False,
         ai_custom_prompt="use concise style",
@@ -272,7 +272,7 @@ def test_settings_flow_apply_and_finalize_updates_runtime_state():
     assert window.gui_config["open_api"] == {"enabled": True, "port": 40123, "token": ""}
     assert window.gui_config["yaml_path"] == window.current_yaml_path
     assert window.ai_panel.ai_provider.value == "deepseek"
-    assert window.ai_panel.ai_model.value == "deepseek-v4-flash"
+    assert window.ai_panel.ai_model.value == "deepseek-flash"
     assert window.ai_panel.ai_steps.current == 9
     assert window.ai_panel.ai_thinking_enabled.value is False
     assert window.ai_panel.ai_custom_prompt == "use concise style"
@@ -296,7 +296,7 @@ def test_settings_flow_ui_scale_change_requests_restart():
         open_api_enabled=False,
         open_api_port=37666,
         ai_provider="deepseek",
-        ai_model="deepseek-v4-flash",
+        ai_model="deepseek-flash",
         ai_max_steps=8,
         ai_thinking_enabled=True,
         ai_custom_prompt="",
@@ -937,7 +937,7 @@ def test_window_state_flow_restore_and_label_and_stats():
         gui_config={
             "ai": {
                 "provider": "deepseek",
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "max_steps": 7,
                 "thinking_enabled": False,
                 "custom_prompt": "abc",
@@ -958,7 +958,7 @@ def test_window_state_flow_restore_and_label_and_stats():
 
     window.restoreGeometry.assert_called_once_with(b"geometry")
     assert window.ai_panel.ai_provider.value == "deepseek"
-    assert window.ai_panel.ai_model.value == "deepseek-v4-flash"
+    assert window.ai_panel.ai_model.value == "deepseek-flash"
     assert window.ai_panel.ai_steps.current == 7
     assert window.ai_panel.ai_thinking_enabled.value is False
     assert window.ai_panel.ai_custom_prompt == "abc"
@@ -1012,7 +1012,7 @@ def test_window_state_flow_close_event_busy_and_persist():
         current_yaml_path="D:/tmp/current.yaml",
     )
     window.ai_panel.ai_provider.setText("deepseek")
-    window.ai_panel.ai_model.setText("deepseek-v4-flash")
+    window.ai_panel.ai_model.setText("deepseek-flash")
     window.ai_panel.ai_steps.setValue(11)
     window.ai_panel.ai_thinking_enabled.setChecked(True)
     window.ai_panel.ai_custom_prompt = "prompt text"
@@ -1025,7 +1025,7 @@ def test_window_state_flow_close_event_busy_and_persist():
     window.settings.setValue.assert_called_once_with("ui/geometry", b"geo")
     assert window.gui_config["yaml_path"] == "D:/tmp/current.yaml"
     assert window.gui_config["ai"]["provider"] == "deepseek"
-    assert window.gui_config["ai"]["model"] == "deepseek-v4-flash"
+    assert window.gui_config["ai"]["model"] == "deepseek-flash"
     assert window.gui_config["ai"]["max_steps"] == 11
     assert window.gui_config["ai"]["thinking_enabled"] is True
     assert window.gui_config["ai"]["custom_prompt"] == "prompt text"
@@ -1362,11 +1362,17 @@ def test_main_window_operation_completed_signal_routes_through_use_case(success,
     )
 
 
-def test_main_window_operation_completed_dispatch_falls_back_to_state_flow():
+def test_main_window_operation_completed_publishes_event_to_subscribers():
     from app_gui.main import MainWindow
+    from app_gui.application.event_bus import EventBus
+    from app_gui.application.use_cases import PlanExecutionUseCase
+    from lib.domain.events import OperationExecuted
 
     window = MainWindow.__new__(MainWindow)
-    window._state_flow = SimpleNamespace(on_operation_completed=MagicMock())
+    bus = EventBus()
+    events = []
+    bus.subscribe(OperationExecuted, events.append)
+    window._plan_execution_use_case = PlanExecutionUseCase(event_bus=bus)
 
     MainWindow._dispatch_operation_completed(
         window,
@@ -1375,7 +1381,10 @@ def test_main_window_operation_completed_dispatch_falls_back_to_state_flow():
         source="operations_panel",
     )
 
-    window._state_flow.on_operation_completed.assert_called_once_with(True)
+    assert len(events) == 1
+    assert events[0].success is True
+    assert events[0].operation == "plan_execute"
+    assert events[0].reason == "operations_panel"
 
 
 def test_main_window_ai_migration_mode_signal_routes_through_use_case():
@@ -1392,15 +1401,37 @@ def test_main_window_ai_migration_mode_signal_routes_through_use_case():
     )
 
 
-def test_main_window_migration_mode_dispatch_falls_back_to_existing_handler():
+def test_main_window_migration_mode_publishes_event_to_subscribers():
     from app_gui.main import MainWindow
+    from app_gui.application.event_bus import EventBus
+    from app_gui.application.use_cases import MigrationModeUseCase
+    from lib.domain.events import MigrationModeChanged
 
     window = MainWindow.__new__(MainWindow)
-    window._apply_migration_mode_enabled = MagicMock()
+    bus = EventBus()
+    events = []
+    bus.subscribe(MigrationModeChanged, events.append)
+    window._migration_mode_use_case = MigrationModeUseCase(event_bus=bus)
 
     MainWindow._request_migration_mode_change(window, False, reason="ai_panel")
 
-    window._apply_migration_mode_enabled.assert_called_once_with(False)
+    assert len(events) == 1
+    assert events[0].enabled is False
+    assert events[0].reason == "ai_panel"
+
+
+def test_main_window_missing_use_cases_do_not_bypass_application_events():
+    from app_gui.main import MainWindow
+
+    window = SimpleNamespace(
+        on_operation_completed=MagicMock(), _apply_migration_mode_enabled=MagicMock(),
+    )
+    with pytest.raises(AttributeError, match="_plan_execution_use_case"):
+        MainWindow._dispatch_operation_completed(window, True, operation="plan_execute", source="ui")
+    with pytest.raises(AttributeError, match="_migration_mode_use_case"):
+        MainWindow._request_migration_mode_change(window, True, reason="ai_panel")
+    window.on_operation_completed.assert_not_called()
+    window._apply_migration_mode_enabled.assert_not_called()
 
 
 def test_main_window_migration_mode_change_forwards_to_operations_panel():

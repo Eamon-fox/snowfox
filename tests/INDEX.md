@@ -4,6 +4,8 @@
 
 ## unit/ — 纯函数，无 I/O
 
+- test_grid_selection.py - Grid selection transitions, neighbor edges and keyboard navigation without Qt widgets. <!-- 无窗口选择状态、外边框与导航 -->
+- test_overview_projection_query.py - Shared query pipeline, draft overlay and public row field isolation. <!-- 共用查询、草稿合成与对外字段隔离 -->
 - test_validators.py - Field and model validation rules. <!-- 字段与模型验证规则 -->
 - test_validators_conflict.py - Conflict detection in plan items. <!-- 计划项冲突检测 -->
 - test_validate.py - Validation entrypoint behavior. <!-- 验证入口行为 -->
@@ -57,6 +59,7 @@
 
 ### gui/ — GUI 面板与主窗口
 
+- test_table_selection_paint.py - Stable focused/selected table painting without extra focus borders. <!-- 表格焦点前后像素一致性 -->
 - test_gui_panels_ops_settings_operations.py - Operations panel behavior: prefill/context/move/takeout/rollback (split from test_gui_panels_ops_settings.py). <!-- Operations 面板：预填/上下文/移动/取出/回滚（由原 test_gui_panels_ops_settings.py 拆分） -->
 - test_gui_panels_ops_settings_settings.py - Settings/help dialog + main-window shortcut behavior (split from test_gui_panels_ops_settings.py). <!-- Settings/帮助对话框与主窗口快捷键（由原 test_gui_panels_ops_settings.py 拆分） -->
 - test_gui_panels_ops_settings_custom_fields.py - Custom-fields dialog + settings custom-field editor behavior (split from test_gui_panels_ops_settings.py). <!-- 自定义字段对话框与设置内自定义字段编辑（由原 test_gui_panels_ops_settings.py 拆分） -->

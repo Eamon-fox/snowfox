@@ -1,17 +1,16 @@
-from PySide6.QtCore import Qt, Signal, Slot, QTimer
-from PySide6.QtWidgets import QWidget, QMenu
-from app_gui.ui.theme import FONT_SIZE_CELL
+from PySide6.QtCore import Signal, Slot, QTimer
+from PySide6.QtWidgets import QWidget
 from app_gui.ui import overview_panel_filters as _ov_filters
 from app_gui.ui import overview_panel_grid as _ov_grid
 from app_gui.ui import overview_panel_interactions as _ov_interactions
 from app_gui.ui import overview_panel_zoom as _ov_zoom
 from app_gui.ui import overview_panel_table as _ov_table
-from app_gui.ui import overview_panel_widgets as _ov_widgets
-from app_gui.ui import overview_panel_cell_button as _ov_cell_button
 from app_gui.ui import overview_panel_ui as _ov_ui
 from app_gui.ui import overview_panel_refresh as _ov_refresh
 from app_gui.ui import overview_panel_runtime as _ov_runtime
 from app_gui.ui.table_entry_draft_store import TableEntryDraftStore
+from app_gui.ui.overview_query_state import OverviewQueryState
+from app_gui.ui.grid_selection import GridSelection
 
 # Module map for maintainers.
 #
@@ -23,30 +22,10 @@ from app_gui.ui.table_entry_draft_store import TableEntryDraftStore
 # - _ov_filters.OverviewFilterController: grid/table filtering + column filter dialogs.
 # - _ov_interactions.OverviewInteractionController: cell click/hover/context-menu, drag-drop.
 #
-# Still bound as partial-class methods (deep shared-state entanglement / heavy
-# test pinning): _ov_grid (grid render + selection state), _ov_table (table render
-# + data projection), _ov_ui (widget tree construction).
-# Reusable Qt widget classes: _ov_widgets, _ov_cell_button.
-MIME_TYPE_MOVE = _ov_cell_button.MIME_TYPE_MOVE
-TABLE_ROW_TINT_ROLE = Qt.UserRole + 41
-TABLE_ROW_KIND_ROLE = Qt.UserRole + 42
-TABLE_ROW_BOX_ROLE = Qt.UserRole + 43
-TABLE_ROW_POSITION_ROLE = Qt.UserRole + 44
-TABLE_COLUMN_NAME_ROLE = Qt.UserRole + 45
-TABLE_EDITOR_KIND_ROLE = Qt.UserRole + 46
-TABLE_EDITOR_OPTIONS_ROLE = Qt.UserRole + 47
-TABLE_EDITOR_REQUIRED_ROLE = Qt.UserRole + 48
-TABLE_ROW_LOCKED_ROLE = Qt.UserRole + 49
-TABLE_ROW_CONFIRMED_ROLE = Qt.UserRole + 50
-_MONKEYPATCH_EXPORTS = (QMenu, FONT_SIZE_CELL)
-
-
-_OverviewTableTintDelegate = _ov_widgets._OverviewTableTintDelegate
-_FilterableHeaderView = _ov_widgets._FilterableHeaderView
-_ColumnFilterDialog = _ov_widgets._ColumnFilterDialog
-
-CellButton = _ov_cell_button.CellButton
-
+# State owners: GridSelection, OverviewQueryState and TableEntryDraftStore.
+# Current-row queries use explicit inputs in overview_table_query.
+# Bound view helpers: _ov_grid (grid rendering), _ov_table (table rendering and
+# editing), _ov_ui (widget tree construction).
 class OverviewPanel(QWidget):
     status_message = Signal(str, int)
     operation_event = Signal(dict)
@@ -76,12 +55,12 @@ class OverviewPanel(QWidget):
         self.overview_pos_map = {}
         self.overview_box_live_labels = {}
         self.overview_box_groups = {}
-        self.overview_selected_key = None
-        self.overview_empty_multi_selected_keys = set()
+        self._selection = GridSelection()
         self.overview_hover_key = None
-        self._overview_selection_anchor_key = None
         self.overview_records_by_id = {}
         self._current_records = []
+        self._current_meta = {}
+        self._current_layout = {}
         self._current_font_sizes = (9, 8)
         self._overview_view_mode = "grid"
         self._grid_include_empty_slots = True
@@ -93,17 +72,12 @@ class OverviewPanel(QWidget):
         self._table_header_labels = {}
         self._table_column_types = {}
         self._table_row_records = []
-        self._table_draft_by_slot = {}
         self._draft_store = TableEntryDraftStore(parent=self)
-        self._table_version = 0
-        self._table_sort_by = "location"
-        self._table_sort_order = "asc"
+        self._query_state = OverviewQueryState()
         self._ignore_table_sort_change = False
         self._ignore_table_item_change = False
-        self._column_unique_cache = {}
         self._hover_warmed = False
         self._show_summary_cards = True  # Can be set to False to hide cards
-        self._column_filters = {}  # {column_name: filter_config}
         self._plan_store_ref = None
         self._operation_markers = {}
         self._stats_response_cache = {}
@@ -146,19 +120,13 @@ class OverviewPanel(QWidget):
 
     _resolve_table_header_labels = _ov_table._resolve_table_header_labels
     _display_table_columns = _ov_table._display_table_columns
-    _active_table_column_filters = _ov_table._active_table_column_filters
     _set_table_columns = _ov_table._set_table_columns
-    _table_query_payload = _ov_table._table_query_payload
-    _query_table_rows = _ov_table._query_table_rows
     _sync_table_sort_indicator = _ov_table._sync_table_sort_indicator
     _on_table_sort_changed = _ov_table._on_table_sort_changed
     _render_table_rows = _ov_table._render_table_rows
     on_table_cell_clicked = _ov_table.on_table_cell_clicked
     on_table_row_double_clicked = _ov_table.on_table_row_double_clicked
     _on_table_item_changed = _ov_table._on_table_item_changed
-    _emit_takeout_prefill_background = _ov_table._emit_takeout_prefill_background
-    _emit_add_prefill_background = _ov_table._emit_add_prefill_background
-    _emit_add_prefill = _ov_table._emit_add_prefill
     _on_table_context_menu = _ov_table._on_table_context_menu
 
     _repaint_all_cells = _ov_grid._repaint_all_cells
@@ -190,6 +158,10 @@ class OverviewPanel(QWidget):
     def _on_plan_store_changed(self):
         _ov_grid._on_plan_store_changed(self)
         _ov_table._on_plan_store_changed(self)
+
+    def selected_slot(self):
+        """Return the active grid slot, or None when no slot is active."""
+        return self._selection.active
 
     def bind_plan_store(self, plan_store):
         self._set_plan_store_ref(plan_store)
@@ -250,9 +222,6 @@ class OverviewPanel(QWidget):
 
     def _get_unique_column_values(self, column_name):
         return self._filters._get_unique_column_values(column_name)
-
-    def _match_column_filter(self, row_data, column_name, filter_config):
-        return self._filters._match_column_filter(row_data, column_name, filter_config)
 
 
     # Cell interaction / hover preview / drag-drop delegate to ``self._interactions``.

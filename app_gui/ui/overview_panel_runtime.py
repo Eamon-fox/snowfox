@@ -239,9 +239,7 @@ class OverviewRuntimeController:
         if ov_table is None or obj is not ov_table:
             return False
 
-        draft_store = getattr(self._p, "_draft_store", None)
-        if draft_store is None:
-            return False
+        draft_store = self._p._draft_store
 
         from app_gui.ui import overview_panel_table as _ov_table
 

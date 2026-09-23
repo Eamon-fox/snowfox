@@ -726,22 +726,14 @@ class MainWindow(QMainWindow):
         )
 
     def _dispatch_operation_completed(self, success, *, operation, source):
-        use_case = getattr(self, "_plan_execution_use_case", None)
-        if use_case is None:
-            self.on_operation_completed(success)
-            return
-        use_case.report_operation_completed(
+        self._plan_execution_use_case.report_operation_completed(
             success=bool(success),
             operation=str(operation or "plan_execute"),
             source=str(source or "ui"),
         )
 
     def _request_migration_mode_change(self, enabled, *, reason):
-        use_case = getattr(self, "_migration_mode_use_case", None)
-        if use_case is None:
-            self._apply_migration_mode_enabled(enabled)
-            return
-        use_case.set_mode(
+        self._migration_mode_use_case.set_mode(
             enabled=bool(enabled),
             reason=str(reason or "ai_panel"),
         )

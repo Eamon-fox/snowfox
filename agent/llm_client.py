@@ -13,16 +13,16 @@ from urllib import request as urlrequest
 
 PROVIDER_DEFAULTS = {
     "deepseek": {
-        "model": "deepseek-v4-flash",
-        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "model": "deepseek-flash",
+        "models": ["deepseek-flash", "deepseek-v4-pro"],
         "env_key": "DEEPSEEK_API_KEY",
         "display_name": "DeepSeek",
         "base_url": "https://api.deepseek.com",
         "help_url": "https://platform.deepseek.com",
     },
     "zhipu": {
-        "model": "glm-5.2",
-        "models": ["glm-5.2", "glm-4.7"],
+        "model": "glm-5.3",
+        "models": ["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-4.7"],
         "env_key": "ZHIPUAI_API_KEY",
         "display_name": "Zhipu AI (GLM)",
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
@@ -621,9 +621,9 @@ class DeepSeekLLMClient(OpenAICompatibleClient):
 
     PROVIDER_NAME = "DeepSeek"
     MODEL_ENV_VAR = "DEEPSEEK_MODEL"
-    DEFAULT_MODEL = "deepseek-v4-flash"
+    DEFAULT_MODEL = PROVIDER_DEFAULTS["deepseek"]["model"]
     BASE_URL_ENV_VAR = "DEEPSEEK_BASE_URL"
-    DEFAULT_BASE_URL = "https://api.deepseek.com"
+    DEFAULT_BASE_URL = PROVIDER_DEFAULTS["deepseek"]["base_url"]
     API_KEY_ENV_VARS = ("DEEPSEEK_API_KEY",)
     API_KEY_ERROR = "DEEPSEEK_API_KEY is required"
     DEFAULT_THINKING_ENABLED = True
@@ -678,12 +678,14 @@ class ZhipuLLMClient(OpenAICompatibleClient):
 
     PROVIDER_NAME = "Zhipu"
     MODEL_ENV_VAR = "ZHIPU_MODEL"
-    DEFAULT_MODEL = "glm-5.2"
+    DEFAULT_MODEL = PROVIDER_DEFAULTS["zhipu"]["model"]
     BASE_URL_ENV_VAR = "ZHIPU_BASE_URL"
-    DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+    DEFAULT_BASE_URL = PROVIDER_DEFAULTS["zhipu"]["base_url"]
     API_KEY_ENV_VARS = ("ZHIPUAI_API_KEY", "ZHIPU_API_KEY", "GLM_API_KEY")
     API_KEY_ERROR = "ZHIPUAI_API_KEY is required. Set ZHIPU_API_KEY or ZHIPUAI_API_KEY env var."
     DEFAULT_THINKING_ENABLED = False
+    # GLM 5.3 always reasons; the thinking switch only selects its effort level.
+    REASONING_REQUIRED_MODELS = ("glm-5.3", "glm-5.3-flash", "glm-5.3-flashx")
     REQUEST_HEADERS = {
         "Accept": "application/json",
         "User-Agent": "SnowFox/1.2.3",
@@ -697,6 +699,9 @@ class ZhipuLLMClient(OpenAICompatibleClient):
             "temperature": temperature,
             "thinking": {"type": "enabled" if self._thinking_enabled else "disabled"},
         }
+        if self._model.casefold() in self.REASONING_REQUIRED_MODELS:
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = "max" if self._thinking_enabled else "low"
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -731,9 +736,9 @@ class MiniMaxLLMClient(OpenAICompatibleClient):
 
     PROVIDER_NAME = "MiniMax"
     MODEL_ENV_VAR = "MINIMAX_MODEL"
-    DEFAULT_MODEL = "MiniMax-M3"
+    DEFAULT_MODEL = PROVIDER_DEFAULTS["minimax"]["model"]
     BASE_URL_ENV_VAR = "MINIMAX_BASE_URL"
-    DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
+    DEFAULT_BASE_URL = PROVIDER_DEFAULTS["minimax"]["base_url"]
     API_KEY_ENV_VARS = ("MINIMAX_API_KEY",)
     API_KEY_ERROR = "MINIMAX_API_KEY is required"
     DEFAULT_THINKING_ENABLED = True

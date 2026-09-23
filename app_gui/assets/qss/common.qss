@@ -20,8 +20,6 @@
 
     /* Borders */
     --border-thin: 1px;
-    --border-medium: 2px;
-    --border-thick: 3px;
 
     /* Sizes */
     --input-height: 20px;
@@ -29,16 +27,16 @@
     --indicator-md: 18px;
     --input-icon-size: 16px;
     --input-arrow-size: 8px;
-    --scrollbar-width: 4px;
-    --scrollbar-handle-min: 20px;
-    --scrollbar-handle-radius: 2px;
+    --scrollbar-width: 10px;
+    --scrollbar-handle-min: 36px;
+    --scrollbar-handle-radius: 5px;
     --splitter-width: 6px;
     --splitter-radius: 2px;
 }
 QToolTip { color: var(--tooltip-color); background-color: var(--tooltip-bg); border: 1px solid var(--tooltip-border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font-size: {FONT_SIZE_SM}px; }
 QGroupBox { background-color: var(--groupbox-bg); border: var(--border-thin) solid var(--groupbox-border); border-radius: var(--radius-lg); margin-top: var(--space-3); font-weight: {FONT_WEIGHT_MEDIUM}; color: var(--text-weak); padding-top: var(--space-2); }
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 var(--space-2); padding-left: var(--space-2); left: var(--space-2); color: var(--text-weak); font-size: {FONT_SIZE_MD}px; border-left: 2px solid var(--accent); }
-QTableWidget { gridline-color: var(--table-border-soft); background-color: var(--table-bg); alternate-background-color: var(--table-alt-bg); selection-background-color: var(--table-selection-bg); border: var(--border-thin) solid var(--table-border-soft); border-radius: var(--radius-md); }
+QTableWidget { gridline-color: var(--table-border-soft); background-color: var(--table-bg); alternate-background-color: var(--table-alt-bg); selection-background-color: var(--table-selection-bg); border: var(--border-thin) solid var(--table-border-soft); border-radius: var(--radius-md); outline: none; }
 QTableWidget::item { padding: 4px var(--space-2); border: none; }
 QTableWidget::item:hover { background-color: var(--table-hover-bg); }
 QTableWidget::item:selected { background-color: var(--table-selection-bg); color: var(--text-strong); }
@@ -47,7 +45,7 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit { min-height: var(--in
 QLineEdit, QComboBox { padding: 0 var(--space-2); }
 QSpinBox, QDoubleSpinBox, QDateEdit { padding: 0; margin: 0; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTextEdit, QTextBrowser, QPlainTextEdit { background-color: var(--input-bg); border: var(--border-thin) solid var(--input-border); border-radius: var(--radius-sm); color: var(--input-text); selection-background-color: var(--accent-muted); selection-color: var(--text-strong); }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTextEdit:focus, QTextBrowser:focus, QPlainTextEdit:focus { border: var(--border-medium) solid var(--input-border-focus); background-color: var(--input-focus-bg); }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTextEdit:focus, QTextBrowser:focus, QPlainTextEdit:focus { border-color: var(--input-border-focus); background-color: var(--input-focus-bg); }
 QLineEdit[readOnly="true"], QTextEdit[readOnly="true"], QTextBrowser[readOnly="true"], QPlainTextEdit[readOnly="true"] { background-color: var(--display-bg); border-color: transparent; color: var(--display-text); }
 QPushButton { background-color: var(--button-background); border: var(--border-thin) solid var(--button-border); border-radius: var(--radius-xs); color: var(--text-strong); padding: 1px var(--space-2); font-weight: {FONT_WEIGHT_MEDIUM}; font-size: {FONT_SIZE_MD}px; }
 QPushButton:hover { background-color: var(--button-hover); border-color: var(--button-border); }
@@ -65,6 +63,9 @@ QPushButton#overviewBoxNavButton { border: var(--border-thin) solid var(--border
 QPushButton#overviewBoxNavButton:hover { background: var(--background-hover); border-color: var(--border-strong); }
 QLabel#operationsPlanEmptyLabel { color: var(--text-muted); padding: 16px; font-weight: {FONT_WEIGHT_MEDIUM}; background-color: transparent; border: var(--border-thin) dashed var(--border-subtle); border-radius: var(--radius-md); }
 QTableWidget#operationsPlanTable { border: var(--border-thin) solid var(--border-weak); border-radius: var(--radius-md); }
+QPlainTextEdit#operationsPlanDetail { padding: 6px 8px; border: 1px solid var(--border-weak); background-color: var(--background-inset); }
+QTableWidget#overviewInventoryTable QLineEdit, QTableWidget#overviewInventoryTable QComboBox, QTableWidget#overviewInventoryTable QDateEdit { min-height: 0; max-height: 16777215px; border: 1px solid var(--accent); border-radius: 0; padding: 0 7px; }
+QTableWidget#overviewInventoryTable QComboBox QLineEdit, QTableWidget#overviewInventoryTable QDateEdit QLineEdit { border: none; padding: 0; background: transparent; }
 QWidget#resultCard { background-color: var(--background-inset); border: 1px solid var(--border-weak); border-radius: var(--radius-md); }
 QWidget#resultCard[state="success"] { border-color: var(--success); }
 QWidget#resultCard[state="warning"] { border-color: var(--warning); }
@@ -171,16 +172,19 @@ QLabel#auditEventDetail[state="default"] { border-color: var(--border-weak); }
 QLabel#aiInputHint { font-size: {FONT_SIZE_XS}px; padding-right: 2px; }
 QPushButton[variant="primary"] { background-color: var(--accent); color: var(--primary-btn-text); border-color: var(--accent); font-weight: {FONT_WEIGHT_MEDIUM}; }
 QPushButton[variant="primary"]:hover { background-color: var(--accent-hover); border-color: var(--accent-hover); }
+QPushButton[variant="primary"]:pressed { background-color: var(--btn-primary-border); border-color: var(--btn-primary-border); }
 QPushButton[variant="primary"]:focus { border: var(--border-thin) solid var(--accent-hover); outline: none; }
 QPushButton[variant="ghost"] { background-color: transparent; border-color: transparent; color: var(--text-strong); }
 QPushButton[variant="ghost"]:hover { background-color: var(--background-raised); }
-QPushButton[variant="ghost"]:focus { border: var(--border-medium) solid var(--accent); outline: none; }
+QPushButton[variant="ghost"]:focus { border-color: var(--accent); outline: none; }
+QPushButton[variant="ghost"]:pressed { background-color: var(--button-pressed); }
 QPushButton[variant="danger"] { background-color: var(--btn-danger); color: #ffffff; font-weight: bold; border: 1px solid var(--btn-danger-border); }
 QPushButton[variant="danger"]:hover { background-color: var(--btn-danger-hover); }
 QPushButton[variant="danger"]:pressed { background-color: var(--btn-danger-border); }
 QPushButton[variant="warning"] { background-color: var(--btn-warning); color: #ffffff; font-weight: bold; border: 1px solid var(--btn-warning-border); }
 QPushButton[variant="warning"]:hover { background-color: var(--btn-warning-hover); }
 QPushButton[variant="warning"]:pressed { background-color: var(--btn-warning-border); }
+QPushButton[variant]:disabled { background-color: var(--background-strong); color: var(--text-muted); border-color: transparent; }
 QPushButton#aiRunActionBtn {
     border: none;
     border-radius: var(--radius-sm);

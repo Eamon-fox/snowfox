@@ -71,8 +71,8 @@
     --cell-occupied-hairline: rgba(0,0,0,0.08);
     --groupbox-bg: #ffffff;
     --groupbox-border: #e3e8ef;
-    --scrollbar-handle: rgba(0,0,0,0.15);
-    --scrollbar-handle-hover: rgba(0,0,0,0.25);
+    --scrollbar-handle: rgba(0,0,0,0.22);
+    --scrollbar-handle-hover: rgba(0,0,0,0.35);
     --splitter-color: rgba(15,23,42,0.12);
     --splitter-hover: rgba(43,127,229,0.35);
     --overview-bg: #f5f9fd;

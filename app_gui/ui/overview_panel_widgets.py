@@ -1,9 +1,7 @@
 """Reusable widget classes for OverviewPanel."""
 
 from PySide6.QtCore import QRect, Qt, QSignalBlocker, Signal
-from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -14,87 +12,30 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QScrollArea,
-    QStyle,
-    QStyleOptionViewItem,
-    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
 
+from app_gui.ui.overview_table_roles import (
+    TABLE_ROW_TINT_ROLE,
+    TABLE_EDITOR_KIND_ROLE,
+    TABLE_EDITOR_OPTIONS_ROLE,
+    TABLE_EDITOR_REQUIRED_ROLE,
+)
+from app_gui.ui.table_item_delegate import TintedTableDelegate
 from app_gui.i18n import tr
 from app_gui.ui.icons import Icons, get_icon
 from app_gui.ui.theme import resolve_theme_token
 
 
-class _OverviewTableTintDelegate(QStyledItemDelegate):
-    """Paint row-level color tint for table view cells."""
+class _OverviewTableTintDelegate(TintedTableDelegate):
+    """Stable selection rendering with typed inline editors."""
 
-    def paint(self, painter, option, index):
-        # Keep selected row highlight from theme unchanged.
-        if option.state & QStyle.State_Selected:
-            super().paint(painter, option, index)
-            return
-
-        from app_gui.ui import overview_panel as _ov_panel
-
-        tint_hex = index.data(_ov_panel.TABLE_ROW_TINT_ROLE)
-        if not tint_hex:
-            super().paint(painter, option, index)
-            return
-
-        tint = QColor(str(tint_hex))
-        if not tint.isValid():
-            super().paint(painter, option, index)
-            return
-
-        # Draw standard visuals without display text to avoid ghosting.
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        text = str(opt.text or "")
-        opt.text = ""
-        opt.features = opt.features & ~QStyleOptionViewItem.HasDisplay
-        style = opt.widget.style() if opt.widget is not None else QApplication.style()
-        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
-
-        # Overlay tint first, then redraw text so background stays visible
-        # without reducing text contrast.
-        # Use lighter alpha in light mode to avoid overpowering the row.
-        win_color = option.palette.color(QPalette.Window)
-        is_light = win_color.lightnessF() > 0.5
-        tint.setAlpha(90 if is_light else 128)
-        painter.save()
-        painter.fillRect(opt.rect, tint)
-        painter.restore()
-
-        display_text = str(index.data(Qt.DisplayRole) or text)
-        text = display_text
-        if not text:
-            return
-
-        alignment = int(getattr(opt, "displayAlignment", Qt.AlignLeft | Qt.AlignVCenter))
-
-        text_color = QColor(option.palette.color(QPalette.Text))
-        fg_role = index.data(Qt.ForegroundRole)
-        if hasattr(fg_role, "color"):
-            with_color = fg_role.color()
-            if isinstance(with_color, QColor) and with_color.isValid():
-                text_color = with_color
-        elif isinstance(fg_role, QColor) and fg_role.isValid():
-            text_color = fg_role
-
-        text_rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, opt.widget)
-        if not text_rect.isValid():
-            text_rect = opt.rect.adjusted(6, 0, -6, 0)
-        elided = painter.fontMetrics().elidedText(text, Qt.ElideRight, max(0, text_rect.width()))
-        painter.save()
-        painter.setPen(text_color)
-        painter.drawText(text_rect, alignment | int(Qt.TextSingleLine), elided)
-        painter.restore()
+    def __init__(self, parent=None):
+        super().__init__(TABLE_ROW_TINT_ROLE, parent)
 
     def createEditor(self, parent, option, index):
-        from app_gui.ui import overview_panel as _ov_panel
-
-        editor_kind = str(index.data(_ov_panel.TABLE_EDITOR_KIND_ROLE) or "").strip().lower()
+        editor_kind = str(index.data(TABLE_EDITOR_KIND_ROLE) or "").strip().lower()
         if editor_kind == "date":
             editor = QDateEdit(parent)
             editor.setCalendarPopup(True)
@@ -104,8 +45,8 @@ class _OverviewTableTintDelegate(QStyledItemDelegate):
             editor = QComboBox(parent)
             editor.setEditable(True)
             editor.setInsertPolicy(QComboBox.NoInsert)
-            options = list(index.data(_ov_panel.TABLE_EDITOR_OPTIONS_ROLE) or [])
-            required = bool(index.data(_ov_panel.TABLE_EDITOR_REQUIRED_ROLE))
+            options = list(index.data(TABLE_EDITOR_OPTIONS_ROLE) or [])
+            required = bool(index.data(TABLE_EDITOR_REQUIRED_ROLE))
             if not required:
                 editor.addItem("")
             for option_text in options:

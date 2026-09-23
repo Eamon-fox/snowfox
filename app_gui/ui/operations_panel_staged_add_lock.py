@@ -97,8 +97,8 @@ class StagedAddLockController:
         active_position = payload.get("active_position")
         overview = getattr(self._panel, "_overview_panel_ref", None)
         if active_position in (None, "") and overview is not None:
-            active_key = getattr(overview, "overview_selected_key", None)
-            if isinstance(active_key, (tuple, list)) and len(active_key) == 2:
+            active_key = overview.selected_slot()
+            if active_key is not None:
                 box = payload.get("box")
                 if box in (None, "") or str(active_key[0]) == str(box):
                     active_position = active_key[1]

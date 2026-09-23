@@ -7,21 +7,25 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QHeaderView, QTableWidgetItem
 
 from app_gui.error_localizer import localize_error_payload
+from app_gui.ui.overview_table_roles import (
+    TABLE_ROW_TINT_ROLE,
+    TABLE_ROW_KIND_ROLE,
+    TABLE_ROW_BOX_ROLE,
+    TABLE_ROW_POSITION_ROLE,
+    TABLE_COLUMN_NAME_ROLE,
+    TABLE_EDITOR_KIND_ROLE,
+    TABLE_EDITOR_OPTIONS_ROLE,
+    TABLE_EDITOR_REQUIRED_ROLE,
+    TABLE_ROW_LOCKED_ROLE,
+    TABLE_ROW_CONFIRMED_ROLE,
+)
 from app_gui.i18n import t, tr
+from app_gui.ui.overview_query_state import HISTORY_EVENT_COLUMNS
 from app_gui.ui.theme import pick_contrasting_text_color
 from app_gui.ui.utils import cell_color
 from lib.custom_fields import coerce_value, get_color_key, get_effective_fields
-from lib.overview_table_query import (
-    build_overview_row_search_text,
-    build_overview_table_projection,
-    filter_overview_table_rows,
-    normalize_overview_table_column_filters,
-    overview_table_column_types,
-    paginate_overview_table_rows,
-    sort_overview_table_rows,
-)
 from lib.plan_item_factory import build_add_plan_item
-from lib.position_fmt import format_box_position_display, pos_to_display
+from lib.position_fmt import format_box_position_display
 from lib.schema_aliases import get_input_stored_at
 from lib.validators import parse_date
 
@@ -31,7 +35,6 @@ _TABLE_CONFIRM_MARK = "√"
 _TABLE_DRAFT_MARK = "+"
 _TABLE_RECORD_ROLE = Qt.UserRole + 100
 _TABLE_ROW_DATA_ROLE = Qt.UserRole + 101
-_TABLE_RENDER_ROW_LIMIT = 500
 
 
 def _confirm_cell_display(slot_state, resolved_row):
@@ -44,41 +47,12 @@ def _confirm_cell_display(slot_state, resolved_row):
     return "", False
 
 
-class _SortableOverviewItem(QTableWidgetItem):
-    """QTableWidgetItem with explicit typed sort keys for Overview tables."""
-
-    def __init__(self, text, *, sort_key=None):
-        super().__init__(text)
-        self._sort_key = sort_key
-
-    def __lt__(self, other):
-        try:
-            self_key = getattr(self, "_sort_key", None)
-            other_key = getattr(other, "_sort_key", None) if isinstance(other, _SortableOverviewItem) else None
-
-            if self_key is not None and other_key is not None:
-                try:
-                    if self_key != other_key:
-                        return self_key < other_key
-                except Exception:
-                    pass
-            elif self_key is not None:
-                return True
-            elif other_key is not None:
-                return False
-
-            return _item_display_sort_value(self) < _item_display_sort_value(other)
-        except Exception:
-            return False
-
-
 _OVERVIEW_TABLE_COLUMN_LABEL_KEYS = {
     "frozen_at": "operations.colFrozenAt",
     "stored_at": "operations.colFrozenAt",
     "thaw_events": "operations.colStorageEvents",
     "storage_events": "operations.colStorageEvents",
 }
-_TABLE_HISTORY_EVENT_COLUMNS = frozenset({"thaw_events", "storage_events"})
 
 
 def _safe_int(value):
@@ -86,89 +60,6 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _safe_number(value):
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (int, float)):
-        return value
-
-    text = str(value or "").strip()
-    if not text:
-        return None
-
-    with suppress(TypeError, ValueError):
-        return int(text)
-    with suppress(TypeError, ValueError):
-        return float(text)
-    return None
-
-
-def _table_render_limit(self):
-    raw_limit = getattr(self, "_table_render_row_limit", _TABLE_RENDER_ROW_LIMIT)
-    if raw_limit in (None, ""):
-        return None
-    with suppress(TypeError, ValueError):
-        limit = int(raw_limit)
-        if limit > 0:
-            return limit
-    return _TABLE_RENDER_ROW_LIMIT
-
-
-def _text_sort_key(value):
-    text = str(value or "").strip()
-    if not text:
-        return None
-    return text.casefold()
-
-
-def _item_display_sort_value(item):
-    try:
-        text = str(item.text() or "").strip()
-    except Exception:
-        text = ""
-    if not text:
-        return (1, "")
-    return (0, text.casefold())
-
-
-def _location_sort_key(row_data, value):
-    box = _safe_int(row_data.get("box"))
-    position = _safe_int(row_data.get("position"))
-    if box is not None and position is not None:
-        return (box, position)
-
-    record = row_data.get("record")
-    if isinstance(record, dict):
-        box = _safe_int(record.get("box"))
-        position = _safe_int(record.get("position"))
-        if box is not None and position is not None:
-            return (box, position)
-
-    parts = str(value or "").split(":")
-    if len(parts) != 2:
-        return None
-
-    box = _safe_int(parts[0])
-    position = _safe_int(parts[1])
-    if box is None or position is None:
-        return None
-    return (box, position)
-
-
-def _column_sort_key(column, value, row_data, *, column_type):
-    if column == _TABLE_CONFIRM_COLUMN:
-        return None
-    if column == "location":
-        return _location_sort_key(row_data, value)
-    if column == "id":
-        return _safe_number(value)
-    if column_type == "number":
-        return _safe_number(value)
-    if column_type == "date":
-        return parse_date(value)
-    return _text_sort_key(value)
 
 
 def _table_field_definitions(self):
@@ -182,13 +73,6 @@ def _table_field_definitions(self):
         if key:
             field_defs[key] = dict(field_def)
     return field_defs
-
-
-def _table_entry_columns(self):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.entry_columns()
-    return {"stored_at", "frozen_at"} | set(_table_field_definitions(self))
 
 
 def _table_column_editor_config(self, column_name):
@@ -223,110 +107,6 @@ def _table_row_slot_key(row_data):
     return (box, position)
 
 
-def _normalize_add_item_positions(item):
-    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-    raw_positions = payload.get("positions") if isinstance(payload.get("positions"), list) else []
-    if not raw_positions:
-        raw_positions = [item.get("position")]
-
-    normalized = []
-    for raw_position in raw_positions:
-        position = _safe_int(raw_position)
-        if position is None or position <= 0 or position in normalized:
-            continue
-        normalized.append(position)
-    return tuple(sorted(normalized))
-
-
-def _blank_entry_values(self):
-    return {column: "" for column in sorted(_table_entry_columns(self))}
-
-
-def _normalize_entry_values(self, values):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.normalize_entry_values(values)
-    normalized = _blank_entry_values(self)
-    for column in normalized:
-        normalized[column] = str((values or {}).get(column, "") or "").strip()
-    stored_at = str(get_input_stored_at(normalized, default="") or "").strip()
-    normalized["stored_at"] = stored_at
-    normalized["frozen_at"] = stored_at
-    return normalized
-
-
-def _entry_values_signature(self, values):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.entry_values_signature(values)
-    normalized = _normalize_entry_values(self, values)
-    return tuple((column, normalized[column]) for column in sorted(normalized))
-
-
-def _staged_add_slot_map(self):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.staged_slot_map()
-    store = getattr(self, "_plan_store_ref", None)
-    if store is None or not hasattr(store, "list_items"):
-        return {}
-
-    field_defs = _table_field_definitions(self)
-    color_key = get_color_key(
-        getattr(self, "_current_meta", {}) or {},
-        inventory=getattr(self, "_current_records", []) or [],
-    )
-    slot_map = {}
-    try:
-        plan_items = store.list_items()
-    except Exception:
-        plan_items = []
-
-    for item in list(plan_items or []):
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("action") or "").strip().lower() != "add":
-            continue
-
-        box = _safe_int(item.get("box"))
-        positions = _normalize_add_item_positions(item)
-        if box is None or not positions:
-            continue
-
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
-        values = _blank_entry_values(self)
-        stored_at = str(get_input_stored_at(payload, default="") or "").strip()
-        if stored_at:
-            values["stored_at"] = stored_at
-        for key in field_defs:
-            raw_value = fields.get(key)
-            values[key] = "" if raw_value in (None, "") else str(raw_value)
-        color_value = str(values.get(color_key) or fields.get(color_key) or "")
-        editable = len(positions) == 1
-        for position in positions:
-            slot_map[(box, position)] = {
-                "item": item,
-                "positions": positions,
-                "values": dict(values),
-                "color_value": color_value,
-                "editable": editable,
-            }
-    return slot_map
-
-
-def _staged_entry_values_for_slot(self, slot_key):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.staged_entry_values_for_slot(slot_key)
-    if slot_key is None:
-        return _blank_entry_values(self)
-    staged = _staged_add_slot_map(self).get(tuple(slot_key))
-    if not staged:
-        return _blank_entry_values(self)
-    return _normalize_entry_values(self, staged.get("values") or {})
-
-
 def _display_table_columns(self, data_columns):
     columns = _visible_table_data_columns(self, data_columns)
     if not bool(getattr(self, "_table_include_inactive", False)):
@@ -338,158 +118,7 @@ def _visible_table_data_columns(self, data_columns):
     columns = [str(column or "") for column in list(data_columns or [])]
     if bool(getattr(self, "_table_include_inactive", False)):
         return columns
-    return [column for column in columns if column not in _TABLE_HISTORY_EVENT_COLUMNS]
-
-
-def _active_table_column_filters(self):
-    filters = dict(getattr(self, "_column_filters", {}) or {})
-    if bool(getattr(self, "_table_include_inactive", False)):
-        return filters
-    return {
-        column: filter_config
-        for column, filter_config in filters.items()
-        if str(column or "") not in _TABLE_HISTORY_EVENT_COLUMNS
-    }
-
-
-def _row_search_text(columns, values):
-    return build_overview_row_search_text(columns, values)
-
-
-def _overlay_current_view_rows(self, rows, data_columns):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        return draft_store.resolve_rows(list(rows or []), data_columns)
-
-    staged_map = _staged_add_slot_map(self)
-    draft_map = dict(getattr(self, "_table_draft_by_slot", {}) or {})
-    color_key = get_color_key(
-        getattr(self, "_current_meta", {}) or {},
-        inventory=getattr(self, "_current_records", []) or [],
-    )
-    overlayed_rows = []
-
-    for raw_row in list(rows or []):
-        row_data = dict(raw_row or {})
-        values = dict(row_data.get("values") or {})
-        slot_key = _table_row_slot_key(row_data)
-        row_kind = str(row_data.get("row_kind") or "")
-        row_confirmed = False
-        row_locked = False
-
-        if row_kind == "empty_slot" and slot_key is not None:
-            staged = staged_map.get(slot_key)
-            draft_values = draft_map.get(slot_key)
-            if isinstance(draft_values, dict):
-                values.update(_normalize_entry_values(self, draft_values))
-                row_locked = bool(staged and not staged.get("editable"))
-            elif staged:
-                values.update(_normalize_entry_values(self, staged.get("values") or {}))
-                row_confirmed = True
-                row_locked = not bool(staged.get("editable"))
-
-            row_data["color_value"] = str(values.get(color_key) or "")
-
-        row_data["values"] = values
-        row_data["row_confirmed"] = row_confirmed
-        row_data["row_locked"] = row_locked
-        row_data["search_text"] = _row_search_text(data_columns, values)
-        overlayed_rows.append(row_data)
-
-    return overlayed_rows
-
-
-def _query_current_table_rows(self, *, keyword, selected_box, selected_cell):
-    projection = build_overview_table_projection(
-        getattr(self, "_current_records", []) or [],
-        meta=getattr(self, "_current_meta", {}) or {},
-        layout=getattr(self, "_current_layout", {}) or {},
-        include_empty_slots=True,
-    )
-    data_columns = _visible_table_data_columns(self, projection.get("columns") or [])
-    normalized_sort_by = str(getattr(self, "_table_sort_by", "location") or "location")
-    if normalized_sort_by not in {str(column) for column in data_columns}:
-        normalized_sort_by = "location" if "location" in data_columns else (data_columns[0] if data_columns else "location")
-        self._table_sort_by = normalized_sort_by
-
-    normalized_column_filters = normalize_overview_table_column_filters(
-        data_columns,
-        _active_table_column_filters(self),
-    )
-    current_rows = _overlay_current_view_rows(self, projection.get("rows") or [], data_columns)
-    filtered_rows, matched_boxes = filter_overview_table_rows(
-        current_rows,
-        keyword=keyword,
-        box=selected_box,
-        color_value=selected_cell,
-        include_inactive=False,
-        column_filters=normalized_column_filters,
-    )
-    column_types = overview_table_column_types(
-        data_columns,
-        meta=getattr(self, "_current_meta", {}) or {},
-        rows=filtered_rows,
-    )
-    sorted_rows = sort_overview_table_rows(
-        filtered_rows,
-        sort_by=normalized_sort_by,
-        sort_order=str(getattr(self, "_table_sort_order", "asc") or "asc"),
-        column_types=column_types,
-    )
-    render_limit = _table_render_limit(self)
-    paged_rows, normalized_limit, normalized_offset = paginate_overview_table_rows(
-        sorted_rows,
-        limit=render_limit,
-        offset=0,
-    )
-
-    display_rows = []
-    for row_data in paged_rows:
-        display_rows.append(
-            {
-                "row_kind": row_data.get("row_kind"),
-                "record_id": row_data.get("record_id"),
-                "record": row_data.get("record"),
-                "box": row_data.get("box"),
-                "position": row_data.get("position"),
-                "active": bool(row_data.get("active")),
-                "color_value": row_data.get("color_value"),
-                "values": dict(row_data.get("values") or {}),
-                "row_confirmed": bool(row_data.get("row_confirmed")),
-                "row_locked": bool(row_data.get("row_locked")),
-                "slot_state": str(row_data.get("slot_state") or ""),
-            }
-        )
-
-    total_count = len(sorted_rows)
-    display_count = len(display_rows)
-    has_more = normalized_limit is not None and (normalized_offset + display_count) < total_count
-
-    return {
-        "ok": True,
-        "result": {
-            "columns": data_columns,
-            "column_types": column_types,
-            "rows": display_rows,
-            "color_key": projection.get("color_key"),
-            "total_count": total_count,
-            "display_count": display_count,
-            "matched_boxes": matched_boxes,
-            "limit": normalized_limit,
-            "offset": normalized_offset,
-            "has_more": has_more,
-            "applied_filters": {
-                "keyword": str(keyword or "").strip(),
-                "box": selected_box,
-                "color_value": None if selected_cell in (None, "") else str(selected_cell),
-                "include_inactive": False,
-                "column_filters": normalized_column_filters,
-                "sort_by": normalized_sort_by,
-                "sort_order": str(getattr(self, "_table_sort_order", "asc") or "asc"),
-                "sort_nulls": "last",
-            },
-        },
-    }
+    return [column for column in columns if column not in HISTORY_EVENT_COLUMNS]
 
 
 def display_table_column_label(column_name):
@@ -567,56 +196,15 @@ def _format_location_value(self, row_data, fallback_value):
     )
 
 
-def _table_query_payload(self, *, keyword, selected_box, selected_cell):
-    return {
-        "keyword": keyword,
-        "box": selected_box,
-        "color_value": selected_cell,
-        "include_inactive": bool(getattr(self, "_table_include_inactive", False)),
-        "column_filters": _active_table_column_filters(self),
-        "sort_by": str(getattr(self, "_table_sort_by", "location") or "location"),
-        "sort_order": str(getattr(self, "_table_sort_order", "asc") or "asc"),
-        "limit": _table_render_limit(self),
-        "offset": 0,
-    }
-
-
-def _query_table_rows(self, *, keyword, selected_box, selected_cell):
-    if bool(getattr(self, "_table_include_inactive", False)):
-        payload = _table_query_payload(
-            self,
-            keyword=keyword,
-            selected_box=selected_box,
-            selected_cell=selected_cell,
-        )
-        yaml_path = self.yaml_path_getter()
-        filter_records = getattr(self.bridge, "filter_records", None)
-        if not callable(filter_records):
-            return {
-                "ok": False,
-                "message": "OverviewPanel bridge must provide filter_records()",
-            }
-        return filter_records(yaml_path=yaml_path, **payload)
-    return _query_current_table_rows(
-        self,
-        keyword=keyword,
-        selected_box=selected_box,
-        selected_cell=selected_cell,
-    )
-
-
 def _sync_table_sort_indicator(self):
     header = getattr(self, "ov_table_header", None)
     columns = list(getattr(self, "_table_columns", []) or [])
     if header is None or not columns:
         return
 
-    sort_by = str(getattr(self, "_table_sort_by", "location") or "location")
-    if sort_by not in columns:
-        sort_by = "location" if "location" in columns else columns[0]
-        self._table_sort_by = sort_by
+    sort_by = self._query_state.reconcile_sort(columns)
 
-    sort_order = str(getattr(self, "_table_sort_order", "asc") or "asc").lower()
+    sort_order = str(self._query_state.sort_order or "asc").lower()
     qt_order = Qt.DescendingOrder if sort_order == "desc" else Qt.AscendingOrder
     section_index = columns.index(sort_by)
 
@@ -637,9 +225,11 @@ def _on_table_sort_changed(self, logical_index, order):
 
     column_name = str(columns[logical_index] or "location")
     if column_name == _TABLE_CONFIRM_COLUMN:
+        self._sync_table_sort_indicator()
         return
-    self._table_sort_by = column_name
-    self._table_sort_order = "desc" if order == Qt.DescendingOrder else "asc"
+    self._query_state.sort_by = column_name
+    self._query_state.sort_order = "desc" if order == Qt.DescendingOrder else "asc"
+    self._apply_filters()
 
 
 def _table_cell_is_editable(self, row_data, column_name):
@@ -649,26 +239,12 @@ def _table_cell_is_editable(self, row_data, column_name):
         return False
     if bool(row_data.get("row_locked")):
         return False
-    return str(column_name or "") in _table_entry_columns(self)
+    return str(column_name or "") in self._draft_store.entry_columns()
 
 
 def _row_text_brush(color_value):
     tint_hex = cell_color(color_value or None)
     return tint_hex, QBrush(QColor(pick_contrasting_text_color(tint_hex)))
-
-
-def _column_type_map(self):
-    column_type_map = dict(getattr(self, "_table_column_types", {}) or {})
-    for column in list(getattr(self, "_table_columns", []) or []):
-        if column in column_type_map or column == _TABLE_CONFIRM_COLUMN:
-            continue
-        if column == "location":
-            column_type_map[column] = "location"
-        elif column == "id":
-            column_type_map[column] = "number"
-        else:
-            column_type_map[column] = self._detect_column_type(column)
-    return column_type_map
 
 
 def _row_identity_key(row_data):
@@ -701,12 +277,12 @@ def _table_row_data_from_item(item):
 
     record = item.data(_TABLE_RECORD_ROLE)
     return {
-        "row_kind": item.data(Qt.UserRole + 42),
-        "box": item.data(Qt.UserRole + 43),
-        "position": item.data(Qt.UserRole + 44),
+        "row_kind": item.data(TABLE_ROW_KIND_ROLE),
+        "box": item.data(TABLE_ROW_BOX_ROLE),
+        "position": item.data(TABLE_ROW_POSITION_ROLE),
         "record": record if isinstance(record, dict) else None,
-        "row_locked": bool(item.data(Qt.UserRole + 49)),
-        "row_confirmed": bool(item.data(Qt.UserRole + 50)),
+        "row_locked": bool(item.data(TABLE_ROW_LOCKED_ROLE)),
+        "row_confirmed": bool(item.data(TABLE_ROW_CONFIRMED_ROLE)),
     }
 
 
@@ -741,44 +317,24 @@ def _table_row_item(self, row, column_name):
 
 def _snapshot_table_entry_values(self, row, *, row_data=None):
     base_row = dict(row_data or _table_row_data(self, row) or {})
-    snapshot = _normalize_entry_values(self, (base_row.get("values") or {}))
+    snapshot = self._draft_store.normalize_entry_values((base_row.get("values") or {}))
     for column_name in snapshot:
         item = _table_row_item(self, row, column_name)
         if item is None:
             continue
         snapshot[column_name] = str(item.text() or "").strip()
+        if column_name in {"stored_at", "frozen_at"}:
+            snapshot["stored_at"] = snapshot["frozen_at"] = snapshot[column_name]
     return snapshot
 
 
 def _row_with_entry_values(self, row_data, entry_values):
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        enriched = dict(row_data or {})
-        enriched["_data_columns"] = list(getattr(self, "_table_data_columns", []) or [])
-        return draft_store.resolve_single_row(enriched, entry_values)
-
-    next_row = dict(row_data or {})
-    values = dict(next_row.get("values") or {})
-    values.update(_normalize_entry_values(self, entry_values))
-    color_key = get_color_key(
-        getattr(self, "_current_meta", {}) or {},
-        inventory=getattr(self, "_current_records", []) or [],
-    )
-    next_row["values"] = values
-    next_row["color_value"] = str(values.get(color_key) or "")
-    next_row["search_text"] = _row_search_text(getattr(self, "_table_data_columns", []) or [], values)
-
-    slot_key = _table_row_slot_key(next_row)
-    staged = _staged_add_slot_map(self).get(slot_key) if slot_key is not None else None
-    draft = dict(getattr(self, "_table_draft_by_slot", {}) or {}).get(slot_key)
-    next_row["row_locked"] = bool(staged and not staged.get("editable"))
-    next_row["row_confirmed"] = bool(staged) and not isinstance(draft, dict)
-    return next_row
+    row = dict(row_data)
+    row["values"] = {**row.get("values", {}), **self._draft_store.normalize_entry_values(entry_values)}
+    return self._draft_store.resolve_rows([row], self._table_data_columns)[0]
 
 
-def _render_table_row(self, row_index, row_data, column_type_map):
-    from app_gui.ui import overview_panel as _ov_panel
-
+def _render_table_row(self, row_index, row_data):
     resolved_row = dict(row_data or {})
     values = dict(resolved_row.get("values") or {})
     row_tint, row_text_brush = _row_text_brush(resolved_row.get("color_value"))
@@ -799,31 +355,23 @@ def _render_table_row(self, row_index, row_data, column_type_map):
             raw_value = values.get(column, "")
             display_value = _format_location_value(self, resolved_row, raw_value) if column == "location" else raw_value
 
-        item = _SortableOverviewItem(
-            str(display_value),
-            sort_key=_column_sort_key(
-                column,
-                raw_value,
-                resolved_row,
-                column_type=column_type_map.get(column),
-            ),
-        )
-        item.setData(_ov_panel.TABLE_ROW_TINT_ROLE, row_tint)
-        item.setData(_ov_panel.TABLE_ROW_KIND_ROLE, str(resolved_row.get("row_kind") or ""))
-        item.setData(_ov_panel.TABLE_ROW_BOX_ROLE, _safe_int(resolved_row.get("box")))
-        item.setData(_ov_panel.TABLE_ROW_POSITION_ROLE, _safe_int(resolved_row.get("position")))
-        item.setData(_ov_panel.TABLE_COLUMN_NAME_ROLE, column)
-        item.setData(_ov_panel.TABLE_ROW_LOCKED_ROLE, bool(resolved_row.get("row_locked")))
-        item.setData(_ov_panel.TABLE_ROW_CONFIRMED_ROLE, bool(resolved_row.get("row_confirmed")))
+        item = QTableWidgetItem(str(display_value))
+        item.setData(TABLE_ROW_TINT_ROLE, row_tint)
+        item.setData(TABLE_ROW_KIND_ROLE, str(resolved_row.get("row_kind") or ""))
+        item.setData(TABLE_ROW_BOX_ROLE, _safe_int(resolved_row.get("box")))
+        item.setData(TABLE_ROW_POSITION_ROLE, _safe_int(resolved_row.get("position")))
+        item.setData(TABLE_COLUMN_NAME_ROLE, column)
+        item.setData(TABLE_ROW_LOCKED_ROLE, bool(resolved_row.get("row_locked")))
+        item.setData(TABLE_ROW_CONFIRMED_ROLE, bool(resolved_row.get("row_confirmed")))
         item.setData(_TABLE_RECORD_ROLE, record if isinstance(record, dict) else None)
         item.setData(_TABLE_ROW_DATA_ROLE, dict(resolved_row))
         item.setForeground(row_text_brush)
 
         editable = _table_cell_is_editable(self, resolved_row, column)
         editor_config = _table_column_editor_config(self, column) if editable else {"kind": "", "options": [], "required": False}
-        item.setData(_ov_panel.TABLE_EDITOR_KIND_ROLE, editor_config.get("kind", ""))
-        item.setData(_ov_panel.TABLE_EDITOR_OPTIONS_ROLE, list(editor_config.get("options") or []))
-        item.setData(_ov_panel.TABLE_EDITOR_REQUIRED_ROLE, bool(editor_config.get("required")))
+        item.setData(TABLE_EDITOR_KIND_ROLE, editor_config.get("kind", ""))
+        item.setData(TABLE_EDITOR_OPTIONS_ROLE, list(editor_config.get("options") or []))
+        item.setData(TABLE_EDITOR_REQUIRED_ROLE, bool(editor_config.get("required")))
 
         flags = item.flags() | Qt.ItemIsEnabled | Qt.ItemIsSelectable
         if editable:
@@ -869,7 +417,7 @@ def _row_render_signature(row_data, columns):
 def _render_table_rows(self, rows):
     rows_list = list(rows or [])
     columns = list(getattr(self, "_table_columns", []) or [])
-    column_type_map = _column_type_map(self)
+    column_type_map = self._table_column_types
     shape_key = (tuple(columns), tuple(sorted(column_type_map.items())))
     prev_shape_key = getattr(self, "_table_render_shape_key", None)
     prev_signatures = list(getattr(self, "_table_row_signatures", []) or [])
@@ -891,7 +439,7 @@ def _render_table_rows(self, rows):
             self.ov_table.setRowCount(len(rows_list))
             self._table_row_records = [None] * len(rows_list)
             for row_index, row_data in enumerate(rows_list):
-                _render_table_row(self, row_index, row_data, column_type_map)
+                _render_table_row(self, row_index, row_data)
         else:
             if len(self._table_row_records) < len(rows_list):
                 self._table_row_records.extend(
@@ -900,11 +448,10 @@ def _render_table_rows(self, rows):
             for row_index, (sig, row_data) in enumerate(zip(new_signatures, rows_list)):
                 if prev_signatures[row_index] == sig:
                     continue
-                _render_table_row(self, row_index, row_data, column_type_map)
+                _render_table_row(self, row_index, row_data)
     finally:
         self._ignore_table_item_change = False
         self.ov_table.setUpdatesEnabled(updates_enabled)
-        self.ov_table.setSortingEnabled(True)
 
     self._table_row_signatures = new_signatures
     self._table_render_shape_key = shape_key
@@ -918,14 +465,12 @@ def _refresh_table_entry_row_visual(self, row, *, row_data=None):
     selected_row = current_item.row() if current_item is not None else row
     current_column = current_item.column() if current_item is not None else 0
 
-    sorting_enabled = bool(self.ov_table.isSortingEnabled())
     self.ov_table.setSortingEnabled(False)
     self._ignore_table_item_change = True
     try:
-        _render_table_row(self, row, current_row, _column_type_map(self))
+        _render_table_row(self, row, current_row)
     finally:
         self._ignore_table_item_change = False
-        self.ov_table.setSortingEnabled(sorting_enabled)
 
     signatures = list(getattr(self, "_table_row_signatures", []) or [])
     if 0 <= row < len(signatures):
@@ -954,7 +499,7 @@ def _canonical_choice_value(value, options):
 
 
 def _normalize_table_entry_payload(self, row_data, *, snapshot):
-    normalized = _normalize_entry_values(self, snapshot)
+    normalized = self._draft_store.normalize_entry_values(snapshot)
     stored_at = str(get_input_stored_at(normalized, default="") or "").strip()
     if not stored_at:
         header_labels = dict(getattr(self, "_table_header_labels", {}) or {})
@@ -1056,18 +601,10 @@ def _confirm_table_entry_row(self, row):
     )
     self.plan_items_requested.emit([item])
 
-    draft_store = getattr(self, "_draft_store", None)
-    staged = _staged_add_slot_map(self).get(slot_key)
-    if draft_store is not None:
-        if staged is not None:
-            draft_store.clear_draft(slot_key)
-        else:
-            draft_store.set_draft(slot_key, snapshot)
+    if self._draft_store.is_staged(slot_key):
+        self._draft_store.clear_draft(slot_key)
     else:
-        if staged is not None:
-            self._table_draft_by_slot.pop(slot_key, None)
-        else:
-            self._table_draft_by_slot[slot_key] = dict(snapshot)
+        self._draft_store.set_draft(slot_key, snapshot)
 
     _refresh_current_table_view(self)
     return True
@@ -1085,7 +622,7 @@ def _unconfirm_table_entry_row(self, row):
     if slot_key is None:
         return False
 
-    staged = _staged_add_slot_map(self).get(slot_key)
+    staged = self._draft_store.staged_slot_map().get(slot_key)
     if staged is None or not staged.get("editable"):
         return False  # only single-slot (editable) items can be unconfirmed from table
 
@@ -1096,78 +633,9 @@ def _unconfirm_table_entry_row(self, row):
         "position": position,
     }])
 
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        draft_store.clear_draft(slot_key)
-    else:
-        self._table_draft_by_slot.pop(slot_key, None)
+    self._draft_store.clear_draft(slot_key)
 
     return True
-
-
-def _format_add_prefill_positions_text(self, positions):
-    layout = getattr(self, "_current_layout", {}) or {}
-    return ",".join(pos_to_display(int(position), layout) for position in list(positions or []))
-
-
-def _emit_takeout_prefill_background(self, box_num, position, record_id):
-    payload = {
-        "box": int(box_num),
-        "position": int(position),
-        "record_id": int(record_id),
-    }
-    self.request_prefill_background.emit(payload)
-    self.status_message.emit(t("overview.prefillTakeoutAuto", id=payload["record_id"]), 2000)
-
-
-def _emit_add_prefill_background(self, box_num, position, *, positions=None):
-    payload = {
-        "box": int(box_num),
-        "position": int(position),
-    }
-    normalized_positions = []
-    for raw_position in list(positions or []):
-        with suppress(TypeError, ValueError):
-            normalized_positions.append(int(raw_position))
-    normalized_positions = sorted(set(normalized_positions))
-    if len(normalized_positions) > 1:
-        payload["positions"] = normalized_positions
-
-    self.request_add_prefill_background.emit(payload)
-    position_text = (
-        _format_add_prefill_positions_text(self, normalized_positions)
-        if normalized_positions
-        else payload["position"]
-    )
-    self.status_message.emit(
-        t("overview.prefillAddAuto", box=payload["box"], position=position_text),
-        2000,
-    )
-
-
-def _emit_add_prefill(self, box_num, position, *, positions=None):
-    payload = {
-        "box": int(box_num),
-        "position": int(position),
-    }
-    normalized_positions = []
-    for raw_position in list(positions or []):
-        with suppress(TypeError, ValueError):
-            normalized_positions.append(int(raw_position))
-    normalized_positions = sorted(set(normalized_positions))
-    if len(normalized_positions) > 1:
-        payload["positions"] = normalized_positions
-
-    self.request_add_prefill.emit(payload)
-    position_text = (
-        _format_add_prefill_positions_text(self, normalized_positions)
-        if normalized_positions
-        else payload["position"]
-    )
-    self.status_message.emit(
-        t("overview.prefillAdd", box=payload["box"], position=position_text),
-        2000,
-    )
 
 
 def _prefill_table_record_row(self, row_data):
@@ -1176,17 +644,16 @@ def _prefill_table_record_row(self, row_data):
     slot_key = _table_row_slot_key(normalized_row)
 
     if row_kind == "empty_slot" and slot_key is not None:
-        staged = _staged_add_slot_map(self).get(slot_key)
+        staged = self._draft_store.staged_slot_map().get(slot_key)
         if staged and len(tuple(staged.get("positions") or ())) > 1:
-            _emit_add_prefill_background(
-                self,
+            self._interactions.emit_add_prefill(
                 slot_key[0],
                 slot_key[1],
                 positions=tuple(staged.get("positions") or ()),
             )
             return True
 
-        _emit_add_prefill_background(self, slot_key[0], slot_key[1])
+        self._interactions.emit_add_prefill(slot_key[0], slot_key[1])
         return True
 
     record = normalized_row.get("record")
@@ -1205,7 +672,7 @@ def _prefill_table_record_row(self, row_data):
     if box_num is None or position is None or record_id is None:
         return False
 
-    _emit_takeout_prefill_background(self, box_num, position, record_id)
+    self._interactions.emit_takeout_prefill(box_num, position, record_id)
     return True
 
 
@@ -1215,7 +682,7 @@ def on_table_cell_clicked(self, row, column):
         return
 
     row_data = _table_row_data_from_item(item)
-    column_name = str(item.data(Qt.UserRole + 45) or "")
+    column_name = str(item.data(TABLE_COLUMN_NAME_ROLE) or "")
     if column_name == _TABLE_CONFIRM_COLUMN:
         # Staged + editable (single-slot) → toggle off (unconfirm)
         if (
@@ -1237,15 +704,13 @@ def on_table_row_double_clicked(self, row, column):
 
 
 def _on_table_item_changed(self, item):
-    from app_gui.ui import overview_panel as _ov_panel
-
     if bool(getattr(self, "_ignore_table_item_change", False)):
         return
     if item is None:
         return
 
-    column_name = str(item.data(_ov_panel.TABLE_COLUMN_NAME_ROLE) or "")
-    if column_name not in _table_entry_columns(self):
+    column_name = str(item.data(TABLE_COLUMN_NAME_ROLE) or "")
+    if column_name not in self._draft_store.entry_columns():
         return
 
     row_data = _table_row_data_from_item(item)
@@ -1258,19 +723,7 @@ def _on_table_item_changed(self, item):
         return
 
     snapshot = _snapshot_table_entry_values(self, row, row_data=row_data)
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        draft_store.set_draft(slot_key, snapshot)
-    else:
-        staged_values = _staged_entry_values_for_slot(self, slot_key)
-        if _entry_values_signature(self, snapshot) == _entry_values_signature(self, staged_values):
-            self._table_draft_by_slot.pop(slot_key, None)
-        elif all(not str(value or "").strip() for value in snapshot.values()) and all(
-            not str(value or "").strip() for value in staged_values.values()
-        ):
-            self._table_draft_by_slot.pop(slot_key, None)
-        else:
-            self._table_draft_by_slot[slot_key] = dict(snapshot)
+    self._draft_store.set_draft(slot_key, snapshot)
 
     next_row = _row_with_entry_values(self, row_data, snapshot)
     _set_cached_row_data(self, next_row)
@@ -1282,9 +735,7 @@ def _on_plan_store_changed(self):
         return
     if bool(getattr(self, "_table_include_inactive", False)):
         return
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        draft_store.reconcile_with_staged()
+    self._draft_store.reconcile_with_staged()
     _refresh_current_table_view(self)
 
 
@@ -1301,13 +752,12 @@ def _on_table_context_menu(self, pos):
         return
 
     slot_key = _table_row_slot_key(row_data)
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is None or slot_key is None or not draft_store.has_draft(slot_key):
+    if slot_key is None or not self._draft_store.has_draft(slot_key):
         return
 
     menu = QMenu(self)
     discard_action = menu.addAction(t("overview.discardDraft", default="Discard changes"))
     chosen = menu.exec_(self.ov_table.viewport().mapToGlobal(pos))
     if chosen is discard_action:
-        draft_store.clear_draft(slot_key)
+        self._draft_store.clear_draft(slot_key)
         _refresh_current_table_view(self)

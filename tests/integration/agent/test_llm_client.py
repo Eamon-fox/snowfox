@@ -100,15 +100,21 @@ class LlmContentNormalizationTests(unittest.TestCase):
 
 
 class DeepSeekClientParseTests(unittest.TestCase):
-    def test_provider_defaults_include_v4_models_and_default(self):
+    def test_provider_defaults_use_flash_alias_and_keep_pro(self):
         deepseek_cfg = PROVIDER_DEFAULTS["deepseek"]
 
-        self.assertEqual("deepseek-v4-flash", deepseek_cfg["model"])
-        self.assertEqual(["deepseek-v4-flash", "deepseek-v4-pro"], deepseek_cfg["models"])
+        self.assertEqual("deepseek-flash", deepseek_cfg["model"])
+        self.assertEqual(["deepseek-flash", "deepseek-v4-pro"], deepseek_cfg["models"])
+
+    def test_default_client_sends_current_flash_model(self):
+        with patch.dict(os.environ, {}, clear=True):
+            client = DeepSeekLLMClient(api_key="test-key")
+        body = _decode_request_body(client._build_request(messages=[{"role": "user", "content": "hi"}]))
+        self.assertEqual("deepseek-flash", body["model"])
 
     def test_build_request_enables_thinking_by_default(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         body = _decode_request_body(client._build_request(messages=[{"role": "user", "content": "hi"}]))
         self.assertEqual({"type": "enabled"}, body.get("thinking"))
@@ -117,7 +123,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_build_request_can_disable_thinking(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash", thinking_enabled=False)
+            client = DeepSeekLLMClient(model="deepseek-flash", thinking_enabled=False)
 
         body = _decode_request_body(client._build_request(messages=[{"role": "user", "content": "hi"}]))
         self.assertNotIn("reasoning_effort", body)
@@ -129,7 +135,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
         # Regression: DeepSeek rejects follow-up requests in thinking mode when a
         # previous assistant tool-call message is replayed without reasoning_content.
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         messages = [
             {"role": "user", "content": "查 K562"},
@@ -160,7 +166,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_stream_chat_yields_incremental_answer_and_tool_call(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         tool_chunk = {
             "choices": [
@@ -203,7 +209,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_stream_chat_yields_thought_chunks(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         lines = [
             f"data: {json.dumps({'choices': [{'delta': {'reasoning_content': 'think '}}]})}",
@@ -222,7 +228,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_chat_parses_sse_content_and_tool_calls(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         tool_call_part1 = {
             "choices": [
@@ -279,7 +285,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_stream_chat_parses_plain_json_payload(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         payload = {
             "choices": [
@@ -314,7 +320,7 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
     def test_stream_chat_stops_when_stop_event_is_set(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}, clear=False):
-            client = DeepSeekLLMClient(model="deepseek-v4-flash")
+            client = DeepSeekLLMClient(model="deepseek-flash")
 
         lines = [
             f"data: {json.dumps({'choices': [{'delta': {'content': 'first'}}]})}",
@@ -334,13 +340,35 @@ class DeepSeekClientParseTests(unittest.TestCase):
 
 
 class ZhipuClientParseTests(unittest.TestCase):
-    def test_provider_defaults_include_glm_5_2_and_remove_glm_5(self):
+    def test_provider_defaults_include_glm_5_3_and_remove_glm_5(self):
         zhipu_cfg = PROVIDER_DEFAULTS["zhipu"]
 
-        self.assertEqual("glm-5.2", zhipu_cfg["model"])
-        self.assertEqual(["glm-5.2", "glm-4.7"], zhipu_cfg["models"])
+        self.assertEqual("glm-5.3", zhipu_cfg["model"])
+        self.assertEqual(["glm-5.3", "glm-5.3-flash", "glm-5.3-flashx", "glm-4.7"], zhipu_cfg["models"])
         self.assertNotIn("glm-5", zhipu_cfg["models"])
         self.assertNotIn("glm-5.1", zhipu_cfg["models"])
+        self.assertNotIn("glm-5.2", zhipu_cfg["models"])
+
+    def test_glm_5_3_requests_use_required_reasoning_with_selected_effort(self):
+        tools = [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}]
+        for model in ("glm-5.3", "glm-5.3-flash", "glm-5.3-flashx"):
+            for thinking in (False, True):
+                with self.subTest(model=model, thinking=thinking):
+                    client = ZhipuLLMClient(model=model, api_key="test-key", thinking_enabled=thinking)
+                    body = _decode_request_body(client._build_request(messages=[{"role": "user", "content": "hi"}], tools=tools))
+                    self.assertEqual(model, body["model"])
+                    self.assertEqual({"type": "enabled"}, body["thinking"])
+                    self.assertEqual("max" if thinking else "low", body["reasoning_effort"])
+                    self.assertEqual(tools, body["tools"])
+                    self.assertTrue(body["stream"])
+
+    def test_glm_default_client_uses_5_3_and_valid_reasoning(self):
+        with patch.dict(os.environ, {}, clear=True):
+            client = ZhipuLLMClient(api_key="test-key")
+        body = _decode_request_body(client._build_request(messages=[{"role": "user", "content": "hi"}]))
+        self.assertEqual("glm-5.3", body["model"])
+        self.assertEqual({"type": "enabled"}, body["thinking"])
+        self.assertEqual("low", body["reasoning_effort"])
 
     def test_build_request_disables_thinking_by_default(self):
         with patch.dict(os.environ, {"ZHIPUAI_API_KEY": "test-key"}, clear=False):

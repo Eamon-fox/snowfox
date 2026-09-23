@@ -7,6 +7,46 @@ from PySide6.QtWidgets import QSizePolicy
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is required for GUI panel tests")
 class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
+    def test_pending_table_fits_narrow_panel_and_shows_complete_selected_details(self):
+        from PySide6.QtWidgets import QWidget, QVBoxLayout
+        from lib.plan_item_factory import build_add_plan_item
+        from app_gui.ui import operations_panel_plan_table as plan_view
+
+        panel = self._new_operations_panel()
+        note = "A long pending note " * 30 + "END-OF-NOTE"
+        panel._plan_store.add([build_add_plan_item(
+            box=1, positions=list(range(1, 13)), stored_at="2026-09-22",
+            fields={"cell_line": "HeLa", "short_name": "long sample " * 20, "note": note},
+            source="tests",
+        )])
+        plan_view._refresh_plan_table(panel)
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.addWidget(panel.plan_table)
+        layout.addWidget(panel.plan_detail)
+        try:
+            host.show()
+            for width in (420, 760, 560):
+                host.resize(width, 360)
+                self._app.processEvents()
+                self.assertEqual(0, panel.plan_table.horizontalScrollBar().maximum())
+                self.assertLessEqual(sum(panel.plan_table.columnWidth(c) for c in range(5)), panel.plan_table.viewport().width())
+            widths = [panel.plan_table.columnWidth(c) for c in range(5)]
+            panel.plan_table.selectRow(0)
+            self._app.processEvents()
+            self.assertEqual(widths, [panel.plan_table.columnWidth(c) for c in range(5)])
+            self.assertTrue(panel.plan_detail.isVisible())
+            self.assertIn("12", panel.plan_detail.toPlainText())
+            self.assertIn("END-OF-NOTE", panel.plan_detail.toPlainText())
+            self.assertEqual(0, panel.plan_detail.horizontalScrollBar().maximum())
+            panel._plan_store.clear()
+            plan_view._refresh_plan_table(panel)
+            self.assertFalse(panel.plan_detail.isVisible())
+        finally:
+            host.close()
+            host.deleteLater()
+            panel.deleteLater()
+
     def test_plan_store_queued_refresh_keeps_ui_consistent_after_external_clear(self):
         from PySide6.QtCore import QMetaObject, Qt
         from lib.plan_item_factory import build_rollback_plan_item
@@ -64,7 +104,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
         row_item = panel.plan_table.item(0, 0)
         row_center = panel.plan_table.visualItemRect(row_item).center()
 
-        with patch("app_gui.ui.operations_panel.QMenu") as menu_cls:
+        with patch("app_gui.ui.operations_panel_plan_toolbar.QMenu") as menu_cls:
             fake_menu = menu_cls.return_value
             remove_action = object()
             fake_menu.addAction.return_value = remove_action
@@ -73,7 +113,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
             panel.on_plan_table_context_menu(row_center)
 
         self.assertEqual(1, panel._plan_store.count())
-        self.assertEqual(102, panel.plan_items[0]["record_id"])
+        self.assertEqual(102, panel._plan_store.list_items()[0]["record_id"])
 
     def test_plan_table_context_menu_click_unselected_row_switches_selection(self):
         panel = self._new_operations_panel()
@@ -91,7 +131,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
         row_item = panel.plan_table.item(1, 0)
         row_center = panel.plan_table.visualItemRect(row_item).center()
 
-        with patch("app_gui.ui.operations_panel.QMenu") as menu_cls:
+        with patch("app_gui.ui.operations_panel_plan_toolbar.QMenu") as menu_cls:
             fake_menu = menu_cls.return_value
             remove_action = object()
             fake_menu.addAction.return_value = remove_action
@@ -244,7 +284,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
         ]
         panel.add_plan_items(items)
 
-        self.assertEqual(1, len(panel.plan_items))
+        self.assertEqual(1, len(panel._plan_store.list_items()))
         self.assertEqual(1, panel.plan_table.rowCount())
         # Column 0 now shows merged action with ID
         action_text = panel.plan_table.item(0, 0).text()
@@ -362,7 +402,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
         ]
         panel.add_plan_items(invalid_items)
 
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
         self.assertTrue(any("rejected" in m.lower() for m in messages))
         self.assertFalse(panel.plan_feedback_label.isHidden())
         self.assertTrue(panel.plan_feedback_label.text().strip())
@@ -390,7 +430,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
             },
         ]
         panel.add_plan_items(items)
-        self.assertEqual(1, len(panel.plan_items))
+        self.assertEqual(1, len(panel._plan_store.list_items()))
 
         emitted = []
         panel.operation_completed.connect(lambda ok: emitted.append(ok))
@@ -405,7 +445,7 @@ class GuiPanelsPlanTableTests(GuiPanelsBaseCase):
         self.assertEqual(10, bridge.last_batch_payload["entries"][0]["record_id"])
         self.assertEqual(1, bridge.last_batch_payload["entries"][0]["from"]["box"])
         self.assertEqual("5", bridge.last_batch_payload["entries"][0]["from"]["position"])
-        self.assertEqual(0, len(panel.plan_items))
+        self.assertEqual(0, len(panel._plan_store.list_items()))
         self.assertEqual([True], emitted)
 
     def test_execute_plan_delegates_run_to_plan_run_use_case(self):

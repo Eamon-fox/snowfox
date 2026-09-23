@@ -411,7 +411,7 @@ inventory:
             bridge = GuiToolBridge()
 
             with patch(
-                "app_gui.tool_bridge._write_adapter.invoke_write_tool",
+                "lib.tool_api_write_adapter.resolve_request_backup_path",
                 side_effect=RuntimeError("backup exploded"),
             ):
                 response = bridge.add_entry(
@@ -420,11 +420,32 @@ inventory:
                     positions=[3],
                     stored_at="2026-02-10",
                     fields={},
+                    execution_mode="execute",
                 )
 
             self.assertFalse(response.get("ok"))
             self.assertEqual("backup_create_failed", response.get("error_code"))
             self.assertIn("backup exploded", response.get("message", ""))
+
+    def test_write_execution_bug_is_not_reported_as_backup_failure(self):
+        with _managed_data_root("ln2_bridge_"):
+            path = self._write_inventory("bridge-execution-error")
+            with patch("lib.tool_api.tool_add_entry", side_effect=RuntimeError("write exploded")):
+                with self.assertRaisesRegex(RuntimeError, "write exploded"):
+                    GuiToolBridge().add_entry(
+                        str(path), box=1, positions=[3], stored_at="2026-02-10",
+                        fields={}, execution_mode="execute",
+                    )
+
+    def test_filter_invalid_sort_exposes_structured_column_details(self):
+        with _managed_data_root("ln2_bridge_"):
+            path = self._write_inventory("bridge-invalid-sort")
+            response = GuiToolBridge().filter_records(str(path), sort_by="deleted_field")
+            self.assertFalse(response["ok"])
+            self.assertEqual("invalid_tool_input", response["error_code"])
+            self.assertEqual("sort_by", response["details"]["field"])
+            self.assertEqual("deleted_field", response["details"]["value"])
+            self.assertIn("location", response["details"]["allowed"])
 
     def test_set_box_tag_routes_explicit_write_through_shared_adapter(self):
         with _managed_data_root("ln2_bridge_") as install_dir:

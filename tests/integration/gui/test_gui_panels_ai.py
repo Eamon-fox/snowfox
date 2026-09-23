@@ -13,11 +13,12 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
         call_names = [name for name, _value in panel.ai_chat.calls]
         self.assertIn("append", call_names)
 
-    def test_ai_panel_defaults_model_to_deepseek_chat(self):
+    def test_ai_panel_defaults_model_to_deepseek_flash(self):
         panel = self._new_ai_panel()
 
         # ai_model and ai_thinking_enabled are now managed via Settings
         self.assertIsNotNone(panel.ai_model)
+        self.assertEqual("deepseek-flash", panel.ai_model.text())
         self.assertIsNotNone(panel.ai_thinking_enabled)
         self.assertFalse(panel.ai_stream_has_thought)
 
@@ -25,11 +26,11 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
         panel = self._new_ai_panel()
 
         panel.ai_provider.setText("deepseek")
-        panel.ai_model.setText("deepseek-v4-flash")
+        panel.ai_model.setText("deepseek-flash")
         panel._refresh_model_badge()
 
-        self.assertEqual("deepseek-v4-flash", panel.ai_model_id_label.text())
-        self.assertEqual("deepseek:deepseek-v4-flash", panel.ai_model_id_label.toolTip())
+        self.assertEqual("deepseek-flash", panel.ai_model_id_label.text())
+        self.assertEqual("deepseek:deepseek-flash", panel.ai_model_id_label.toolTip())
 
     def test_ai_panel_model_switch_button_uses_dropdown_icon(self):
         panel = self._new_ai_panel()
@@ -37,7 +38,7 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
         self.assertEqual("", panel.ai_model_switch_btn.text())
         self.assertFalse(panel.ai_model_switch_btn.icon().isNull())
 
-    def test_ai_panel_model_switch_options_include_zhipu_glm_5_2_and_4_7(self):
+    def test_ai_panel_model_switch_options_include_zhipu_glm_5_3_and_4_7(self):
         panel = self._new_ai_panel()
 
         options = panel._iter_model_switch_options()
@@ -47,7 +48,9 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
             if isinstance(item, dict)
         }
 
-        self.assertIn(("zhipu", "glm-5.2"), option_pairs)
+        self.assertIn(("zhipu", "glm-5.3"), option_pairs)
+        self.assertIn(("zhipu", "glm-5.3-flash"), option_pairs)
+        self.assertIn(("zhipu", "glm-5.3-flashx"), option_pairs)
         self.assertIn(("zhipu", "glm-4.7"), option_pairs)
         self.assertNotIn(("zhipu", "glm-5.1"), option_pairs)
         self.assertNotIn(("zhipu", "glm-5"), option_pairs)
@@ -71,7 +74,7 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
     def test_ai_panel_model_switch_menu_updates_provider_and_model(self):
         panel = self._new_ai_panel()
         panel.ai_provider.setText("deepseek")
-        panel.ai_model.setText("deepseek-v4-flash")
+        panel.ai_model.setText("deepseek-flash")
 
         with patch("app_gui.ui.ai_panel.QMenu") as menu_cls:
             fake_menu = menu_cls.return_value
@@ -79,7 +82,7 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
             zhipu_action = MagicMock()
 
             def _add_action(label):
-                if "glm-5.2" in str(label):
+                if str(label) == "glm-5.3 (zhipu)":
                     return zhipu_action
                 return deepseek_action
 
@@ -91,8 +94,8 @@ class GuiPanelsAiStreamTests(GuiPanelsBaseCase):
         self.assertTrue(deepseek_action.setActionGroup.called)
         self.assertTrue(zhipu_action.setActionGroup.called)
         self.assertEqual("zhipu", panel.ai_provider.text())
-        self.assertEqual("glm-5.2", panel.ai_model.text())
-        self.assertEqual("glm-5.2", panel.ai_model_id_label.text())
+        self.assertEqual("glm-5.3", panel.ai_model.text())
+        self.assertEqual("glm-5.3", panel.ai_model_id_label.text())
 
     def test_ai_panel_thought_chunk_is_visible_only_while_active(self):
         panel = self._new_ai_panel()
@@ -1349,7 +1352,7 @@ class OperationEventFeedTests(ManagedPathTestCase):
 
         panel.apply_runtime_settings(
             provider="deepseek",
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
             max_steps=11,
             thinking_enabled=False,
             custom_prompt="stay concise",
@@ -1358,7 +1361,7 @@ class OperationEventFeedTests(ManagedPathTestCase):
         snapshot = panel.runtime_settings_snapshot()
 
         self.assertEqual("deepseek", snapshot["provider"])
-        self.assertEqual("deepseek-v4-flash", snapshot["model"])
+        self.assertEqual("deepseek-flash", snapshot["model"])
         self.assertEqual(11, snapshot["max_steps"])
         self.assertFalse(snapshot["thinking_enabled"])
         self.assertEqual("stay concise", snapshot["custom_prompt"])

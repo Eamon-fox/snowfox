@@ -81,6 +81,7 @@ def build_ai_group(dialog, *, combo_box_cls, spin_box_cls, text_edit_cls) -> QGr
 
     dialog.ai_thinking_enabled = dialog._checkbox_cls()
     dialog.ai_thinking_enabled.setChecked(ai_advanced.get("thinking_enabled", True))
+    dialog.ai_thinking_enabled.setToolTip(tr("settings.aiThinkingHint"))
     ai_layout.addRow(tr("settings.aiThinking"), dialog.ai_thinking_enabled)
 
     dialog.ai_custom_prompt = text_edit_cls()

@@ -36,14 +36,17 @@ try:
     )
 
     from app_gui.ui.ai_panel import AIPanel
-    from app_gui.ui.overview_panel import OverviewPanel, TABLE_ROW_TINT_ROLE
+    from app_gui.ui.overview_panel import OverviewPanel
+    from app_gui.ui.overview_table_roles import TABLE_ROW_TINT_ROLE
     from app_gui.ui.operations_panel import OperationsPanel
     from app_gui.ui.utils import cell_color
     from app_gui.error_localizer import localize_error_payload
     from app_gui.i18n import get_language, set_language, t, tr
 
     PYSIDE_AVAILABLE = True
-except Exception:
+except ModuleNotFoundError as exc:
+    if exc.name != "PySide6" and not str(exc.name).startswith("PySide6."):
+        raise
     QDate = None
     Qt = None
     QEvent = None

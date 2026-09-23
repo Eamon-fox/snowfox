@@ -2,14 +2,9 @@
 
 import os
 
+from app_gui.i18n import tr
 from app_gui.error_localizer import localize_error_payload
 
-
-def _tr(key, **kwargs):
-    # Keep tests and monkeypatch points stable on operations_panel.tr.
-    from app_gui.ui import operations_panel as _ops_panel
-
-    return _ops_panel.tr(key, **kwargs)
 
 
 def _handle_response(
@@ -28,14 +23,14 @@ def _handle_response(
     _display_result_summary(self, response, context)
 
     ok = payload.get("ok", False)
-    msg = localize_error_payload(payload, fallback=_tr("operations.unknownResult"))
+    msg = localize_error_payload(payload, fallback=tr("operations.unknownResult"))
     code = str(notice_code or ("operation.success" if ok else "operation.failed"))
 
     if ok:
         _ops_exec._publish_system_notice(
             self,
             code=code,
-            text=_tr("operations.contextSuccess", context=context),
+            text=tr("operations.contextSuccess", context=context),
             level="success",
             timeout=3000,
             data=notice_data if isinstance(notice_data, dict) else None,
@@ -49,7 +44,7 @@ def _handle_response(
         _ops_exec._publish_system_notice(
             self,
             code=code,
-            text=_tr("operations.contextFailed", context=context, error=msg),
+            text=tr("operations.contextFailed", context=context, error=msg),
             level="error",
             timeout=5000,
             data=notice_data
@@ -62,7 +57,7 @@ def _handle_response(
 def _result_header_html(context, *, ok):
     color = "success" if ok else "error"
     key = "operations.contextResultSuccess" if ok else "operations.contextResultFailed"
-    return f"<b style='color: var(--status-{color});'>{_tr(key, context=context)}</b>"
+    return f"<b style='color: var(--status-{color});'>{tr(key, context=context)}</b>"
 
 
 def _build_add_entry_result_lines(self, preview, result):
@@ -80,7 +75,7 @@ def _build_add_entry_result_lines(self, preview, result):
     if new_ids:
         ids_text = ", ".join(str(i) for i in new_ids)
         return [
-            _tr(
+            tr(
                 "operations.addedTubesSummary",
                 count=len(new_ids),
                 ids=ids_text,
@@ -91,7 +86,7 @@ def _build_add_entry_result_lines(self, preview, result):
             )
         ]
     return [
-        _tr(
+        tr(
             "operations.addedTubeSummary",
             id=new_id,
             cell=cell,
@@ -112,7 +107,7 @@ def _build_single_operation_result_lines(self, preview):
     lines = []
     if to_pos is not None:
         lines.append(
-            _tr(
+            tr(
                 "operations.operationRowActionWithTarget",
                 rid=rid,
                 action=action,
@@ -122,11 +117,11 @@ def _build_single_operation_result_lines(self, preview):
         )
     else:
         lines.append(
-            _tr("operations.operationRowActionWithPosition", rid=rid, action=action, pos=pos)
+            tr("operations.operationRowActionWithPosition", rid=rid, action=action, pos=pos)
         )
     if before or after:
         lines.append(
-            _tr(
+            tr(
                 "operations.operationPositionsTransition",
                 before=self._positions_to_display_text(before),
                 after=self._positions_to_display_text(after),
@@ -139,7 +134,7 @@ def _build_batch_operation_result_lines(preview, result):
     count = result.get("count", preview.get("count", 0))
     ids = result.get("record_ids", [])
     return [
-        _tr(
+        tr(
             "operations.processedBatchEntries",
             count=count,
             ids=", ".join(str(i) for i in ids),
@@ -149,7 +144,7 @@ def _build_batch_operation_result_lines(preview, result):
 
 def _build_restore_result_lines(result):
     restored = result.get("restored_from", "?")
-    return [_tr("operations.restoredFrom", path=os.path.basename(str(restored)))]
+    return [tr("operations.restoredFrom", path=os.path.basename(str(restored)))]
 
 
 def _build_success_result_lines(self, context, preview, result):
@@ -176,12 +171,12 @@ def _display_result_summary(self, response, context):
         lines.extend(_build_success_result_lines(self, context, preview, result))
         self._show_result_card(lines, "success")
     else:
-        msg = localize_error_payload(payload, fallback=_tr("operations.unknownError"))
+        msg = localize_error_payload(payload, fallback=tr("operations.unknownError"))
         error_code = payload.get("error_code", "")
         lines = [_result_header_html(context, ok=False)]
         lines.append(str(msg))
         if error_code:
             lines.append(
-                f"<span style='color: var(--status-muted);'>{_tr('operations.codeLabel', code=error_code)}</span>"
+                f"<span style='color: var(--status-muted);'>{tr('operations.codeLabel', code=error_code)}</span>"
             )
         self._show_result_card(lines, "error")

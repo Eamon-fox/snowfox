@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication
 
@@ -366,7 +367,11 @@ class LocalOpenApiTests(ManagedPathTestCase):
 
     def test_http_enforces_token_when_configured(self):
         self.service.stop()
-        self.service.configure(enabled=True, port=0, token="secret-token")
+        # configure maps zero to the default port; isolate this test from a
+        # running desktop instance by making that default ephemeral here.
+        with patch("app_gui.application.open_api.http_service.LOCAL_OPEN_API_DEFAULT_PORT", 0):
+            result = self.service.configure(enabled=True, port=0, token="secret-token")
+        self.assertTrue(result["ok"], result)
         try:
             status, payload = self._request("/api/v1/health")
             self.assertEqual(401, status)

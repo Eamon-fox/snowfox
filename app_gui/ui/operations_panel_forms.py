@@ -28,6 +28,7 @@ from app_gui.i18n import tr
 from app_gui.ui.icons import Icons, get_icon
 from app_gui.ui.theme import resolve_theme_token
 from app_gui.ui.write_guards import guard_write_action
+from app_gui.ui.plan_table import PlanTable
 
 
 def _read_text_widget_value(widget):
@@ -731,9 +732,12 @@ def _build_plan_tab(self):
     self.plan_empty_label.setWordWrap(True)
     layout.addWidget(self.plan_empty_label)
 
-    self.plan_table = QTableWidget()
+    self.plan_table = PlanTable()
     self.plan_table.setObjectName("operationsPlanTable")
     self.plan_table.setMouseTracking(True)
+    self.plan_table.setSelectionBehavior(QTableWidget.SelectRows)
+    self.plan_table.setWordWrap(True)
+    self.plan_table.verticalHeader().setDefaultSectionSize(self.plan_table.fontMetrics().lineSpacing() * 3 + 12)
     _configure_precise_table_scroll(self.plan_table)
     _setup_table(
         self,
@@ -752,6 +756,16 @@ def _build_plan_tab(self):
     self.plan_table.setContextMenuPolicy(Qt.CustomContextMenu)
     self.plan_table.customContextMenuRequested.connect(self.on_plan_table_context_menu)
     layout.addWidget(self.plan_table, 1)
+
+    self.plan_detail = QPlainTextEdit()
+    self.plan_detail.setObjectName("operationsPlanDetail")
+    self.plan_detail.setReadOnly(True)
+    self.plan_detail.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+    self.plan_detail.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    self.plan_detail.setMinimumHeight(80)
+    self.plan_detail.setMaximumHeight(120)
+    self.plan_detail.hide()
+    layout.addWidget(self.plan_detail)
 
     toolbar = QHBoxLayout()
     self.plan_exec_btn = QPushButton(tr("operations.executeAll"))

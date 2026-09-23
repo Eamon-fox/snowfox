@@ -5,14 +5,9 @@ from datetime import datetime
 
 from PySide6.QtWidgets import QMessageBox
 
+from app_gui.i18n import tr
 from app_gui.ui.dialogs.common import ask_yes_no
 
-
-def _ops_tr(key, **kwargs):
-    """Resolve translations through operations_panel module for monkeypatch compatibility."""
-    from app_gui.ui import operations_panel as _ops_panel
-
-    return _ops_panel.tr(key, **kwargs)
 
 
 def _confirm_warning_dialog(self, *, title, text, informative_text, detailed_text=None):
@@ -31,7 +26,7 @@ def _confirm_execute(self, title, details):
     return _confirm_warning_dialog(
         self,
         title=title,
-        text=_ops_tr("operations.confirmModify"),
+        text=tr("operations.confirmModify"),
         informative_text=details,
     )
 
@@ -62,31 +57,31 @@ def _build_rollback_confirmation_lines(
     yaml_abs = os.path.abspath(str(yaml_path or ""))
     raw_backup = str(backup_path or "").strip()
     backup_abs = os.path.abspath(raw_backup) if raw_backup else ""
-    backup_label = os.path.basename(backup_abs) if backup_abs else _ops_tr("operations.planRollbackLatest")
+    backup_label = os.path.basename(backup_abs) if backup_abs else tr("operations.planRollbackLatest")
 
     lines = []
-    restore_line = _ops_tr("operations.planRollbackRestore", backup=backup_label)
+    restore_line = tr("operations.planRollbackRestore", backup=backup_label)
     if include_action_prefix:
-        restore_line = f"{_ops_tr('operations.rollback')}: {restore_line}"
+        restore_line = f"{tr('operations.rollback')}: {restore_line}"
     lines.append(restore_line)
-    lines.append(_ops_tr("operations.planRollbackYamlPath", path=yaml_abs or "-"))
+    lines.append(tr("operations.planRollbackYamlPath", path=yaml_abs or "-"))
 
     if backup_abs:
-        lines.append(_ops_tr("operations.planRollbackBackupPath", path=backup_abs))
+        lines.append(tr("operations.planRollbackBackupPath", path=backup_abs))
         try:
             stat = os.stat(backup_abs)
             mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             size = _format_size_bytes(stat.st_size)
-            lines.append(_ops_tr("operations.planRollbackBackupMeta", mtime=mtime, size=size))
+            lines.append(tr("operations.planRollbackBackupMeta", mtime=mtime, size=size))
         except Exception:
-            lines.append(_ops_tr("operations.planRollbackBackupMissing", path=backup_abs))
+            lines.append(tr("operations.planRollbackBackupMissing", path=backup_abs))
 
     if isinstance(source_event, dict) and source_event:
         timestamp = str(source_event.get("timestamp") or "-")
         action = str(source_event.get("action") or "-")
         trace_id = str(source_event.get("trace_id") or "-")
         lines.append(
-            _ops_tr(
+            tr(
                 "operations.planRollbackSourceEvent",
                 timestamp=timestamp,
                 action=action,

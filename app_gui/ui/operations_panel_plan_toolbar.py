@@ -1,5 +1,7 @@
 """Plan-table selection and toolbar helpers for OperationsPanel."""
 
+from PySide6.QtWidgets import QMenu
+
 from app_gui.i18n import tr
 from app_gui.ui.write_guards import guard_write_action
 
@@ -89,9 +91,7 @@ def on_plan_table_context_menu(self, pos):
         self.plan_table.clearSelection()
         self.plan_table.selectRow(row)
 
-    from app_gui.ui import operations_panel as _ops_panel
-
-    menu = _ops_panel.QMenu(self)
+    menu = QMenu(self)
     remove_action = menu.addAction(tr("operations.removeSelected"))
     chosen_action = menu.exec(self.plan_table.viewport().mapToGlobal(pos))
     if chosen_action == remove_action:

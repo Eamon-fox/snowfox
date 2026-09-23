@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QGridLayout, QGroupBox, QLabel, QSizePolicy, QVBox
 
 from app_gui.i18n import t, tr
 from app_gui.ui.overview_panel_cell_button import CellButton
+from app_gui.ui.grid_selection import normalize_cell_key
 from app_gui.ui.theme import SPACE_1, SPACE_2, cell_empty_style, cell_occupied_style, resolve_theme_token
 from app_gui.ui.utils import cell_color
 from lib.position_fmt import (
@@ -19,7 +20,6 @@ _BOX_TAG_TITLE_MAX_CHARS = 18
 _OCCUPIED_TEXT_SHOW_MIN_CELL_PX = 52
 _CELL_TEXT_MODE_DEFAULT = "default"
 _CELL_TEXT_MODE_WRAPPED = "wrapped"
-_SELECTION_EDGE_ORDER = ("top", "right", "bottom", "left")
 
 
 def _set_button_font_size(button, pixel_size):
@@ -87,18 +87,8 @@ def _freeze_signature_value(value):
     return value
 
 
-def _normalize_cell_key(raw_key):
-    if not isinstance(raw_key, (list, tuple)) or len(raw_key) != 2:
-        return None
-    box_num = _normalize_positive_int(raw_key[0])
-    position = _normalize_positive_int(raw_key[1])
-    if box_num is None or position is None:
-        return None
-    return box_num, position
-
-
 def _cell_is_empty_slot(self, box_num, position, *, require_visible=False):
-    key = _normalize_cell_key((box_num, position))
+    key = normalize_cell_key((box_num, position))
     if key is None:
         return False
 
@@ -111,177 +101,51 @@ def _cell_is_empty_slot(self, box_num, position, *, require_visible=False):
 
 
 def _is_cell_selected(self, box_num, position):
-    key = _normalize_cell_key((box_num, position))
-    if key is None:
-        return False
-
-    empty_keys = set(getattr(self, "overview_empty_multi_selected_keys", set()) or set())
-    if key in empty_keys:
-        return True
-
-    if getattr(self, "overview_selected_key", None) != key:
-        return False
-
-    if self.overview_pos_map.get(key) is not None:
-        return True
-    return not empty_keys
+    key = normalize_cell_key((box_num, position))
+    return key is not None and self._selection.is_selected(
+        key, occupied=self.overview_pos_map.get(key) is not None,
+    )
 
 
 def _is_active_selected_cell(self, box_num, position):
-    key = _normalize_cell_key((box_num, position))
-    if key is None:
-        return False
-    return bool(getattr(self, "overview_selected_key", None) == key and _is_cell_selected(self, key[0], key[1]))
+    key = normalize_cell_key((box_num, position))
+    return key is not None and self._selection.active == key and _is_cell_selected(self, *key)
 
 
 def _selection_edge_mask(self, box_num, position):
-    key = _normalize_cell_key((box_num, position))
-    if key is None or key not in set(getattr(self, "overview_empty_multi_selected_keys", set()) or set()):
-        if _is_cell_selected(self, box_num, position):
-            return _SELECTION_EDGE_ORDER
+    key = normalize_cell_key((box_num, position))
+    if key is None:
         return ()
-
     rows, cols = _grid_dimensions(self)
-    row = (int(key[1]) - 1) // cols
-    col = (int(key[1]) - 1) % cols
-    offsets = {
-        "top": (-1, 0),
-        "right": (0, 1),
-        "bottom": (1, 0),
-        "left": (0, -1),
-    }
-    edges = []
-    selected_keys = set(getattr(self, "overview_empty_multi_selected_keys", set()) or set())
-    for edge_name in _SELECTION_EDGE_ORDER:
-        dr, dc = offsets[edge_name]
-        neighbor_row = row + dr
-        neighbor_col = col + dc
-        if neighbor_row < 0 or neighbor_col < 0 or neighbor_row >= rows or neighbor_col >= cols:
-            edges.append(edge_name)
-            continue
-        neighbor_position = neighbor_row * cols + neighbor_col + 1
-        neighbor_key = (int(key[0]), int(neighbor_position))
-        if neighbor_key not in selected_keys:
-            edges.append(edge_name)
-    return tuple(edges)
+    return self._selection.edge_mask(
+        key, rows=rows, cols=cols, occupied=self.overview_pos_map.get(key) is not None,
+    )
 
 
 def _selected_empty_keys_for_box(self, box_num=None):
-    selected_keys = []
-    for raw_key in set(getattr(self, "overview_empty_multi_selected_keys", set()) or set()):
-        key = _normalize_cell_key(raw_key)
-        if key is not None:
-            selected_keys.append(key)
-    selected_keys.sort()
-    results = []
     box_filter = _normalize_positive_int(box_num) if box_num is not None else None
-    for key in selected_keys:
-        if key is None:
-            continue
-        if box_filter is not None and key[0] != box_filter:
-            continue
-        if not _cell_is_empty_slot(self, key[0], key[1]):
-            continue
-        results.append(key)
-    return results
+    return [
+        key for key in sorted(self._selection.empty_keys)
+        if (box_filter is None or key[0] == box_filter) and _cell_is_empty_slot(self, *key)
+    ]
 
 
 def _set_empty_multi_selection(self, keys, *, anchor_key=None, active_key=None):
-    old_keys = set(getattr(self, "overview_empty_multi_selected_keys", set()) or set())
-    old_active_key = getattr(self, "overview_selected_key", None)
-
-    normalized_keys = []
-    seen = set()
-    box_scope = None
-    for raw_key in list(keys or []):
-        key = _normalize_cell_key(raw_key)
-        if key is None:
-            continue
-        if box_scope is None:
-            box_scope = key[0]
-        if key[0] != box_scope:
-            continue
-        if not _cell_is_empty_slot(self, key[0], key[1]):
-            continue
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized_keys.append(key)
-
-    normalized_keys = sorted(normalized_keys)
-    normalized_key_set = set(normalized_keys)
-
-    resolved_active_key = _normalize_cell_key(active_key)
-    if resolved_active_key not in normalized_key_set:
-        if old_active_key in normalized_key_set:
-            resolved_active_key = old_active_key
-        elif normalized_keys:
-            resolved_active_key = normalized_keys[-1]
-        else:
-            resolved_active_key = None
-
-    resolved_anchor_key = _normalize_cell_key(anchor_key)
-    if resolved_anchor_key not in normalized_key_set:
-        if getattr(self, "_overview_selection_anchor_key", None) in normalized_key_set:
-            resolved_anchor_key = getattr(self, "_overview_selection_anchor_key", None)
-        elif resolved_active_key in normalized_key_set:
-            resolved_anchor_key = resolved_active_key
-        elif normalized_keys:
-            resolved_anchor_key = normalized_keys[0]
-        else:
-            resolved_anchor_key = None
-
-    self.overview_empty_multi_selected_keys = normalized_key_set
-    self._overview_selection_anchor_key = resolved_anchor_key
-    self.overview_selected_key = resolved_active_key
-
-    for key in old_keys | normalized_key_set | {old_active_key, resolved_active_key}:
-        normalized_key = _normalize_cell_key(key)
-        if normalized_key is None:
-            continue
-        button = self.overview_cells.get(normalized_key)
-        if button is None:
-            continue
-        record = self.overview_pos_map.get(normalized_key)
-        self._paint_cell(button, normalized_key[0], normalized_key[1], record)
+    changed = self._selection.replace_empty(
+        keys or [], is_empty=lambda key: _cell_is_empty_slot(self, *key),
+        anchor_key=anchor_key, active_key=active_key,
+    )
+    _repaint_cells(self, changed)
 
 
 def _clear_empty_multi_selection(self, *, clear_anchor=True, clear_active=False):
-    old_keys = set(getattr(self, "overview_empty_multi_selected_keys", set()) or set())
-    old_active_key = getattr(self, "overview_selected_key", None)
-
-    self.overview_empty_multi_selected_keys = set()
-    if clear_anchor:
-        self._overview_selection_anchor_key = None
-    if clear_active:
-        self.overview_selected_key = None
-
-    repaint_keys = set(old_keys)
-    if clear_active:
-        repaint_keys.add(old_active_key)
-    for key in repaint_keys:
-        normalized_key = _normalize_cell_key(key)
-        if normalized_key is None:
-            continue
-        button = self.overview_cells.get(normalized_key)
-        if button is None:
-            continue
-        record = self.overview_pos_map.get(normalized_key)
-        self._paint_cell(button, normalized_key[0], normalized_key[1], record)
+    changed = self._selection.clear_empty(clear_anchor=clear_anchor, clear_active=clear_active)
+    _repaint_cells(self, changed)
 
 
 def _prune_empty_multi_selection(self):
-    valid_keys = _selected_empty_keys_for_box(self)
-    if valid_keys:
-        _set_empty_multi_selection(self, valid_keys)
-        return
-
-    if getattr(self, "overview_empty_multi_selected_keys", None):
-        _clear_empty_multi_selection(self, clear_anchor=True, clear_active=False)
-
-    anchor_key = _normalize_cell_key(getattr(self, "_overview_selection_anchor_key", None))
-    if anchor_key is not None and not _cell_is_empty_slot(self, anchor_key[0], anchor_key[1]):
-        self._overview_selection_anchor_key = None
+    changed = self._selection.prune(lambda key: _cell_is_empty_slot(self, *key))
+    _repaint_cells(self, changed)
 
 
 def _build_cell_render_signature(self, box_num, position, record):
@@ -446,9 +310,7 @@ def _build_operation_marker_map(plan_items, *, display_key=None):
 
 def _set_plan_store_ref(self, plan_store):
     self._plan_store_ref = plan_store
-    draft_store = getattr(self, "_draft_store", None)
-    if draft_store is not None:
-        draft_store.set_plan_store(plan_store)
+    self._draft_store.set_plan_store(plan_store)
     self._on_plan_store_changed()
 
 
@@ -475,13 +337,8 @@ def _set_plan_markers_from_items(self, plan_items):
 
 
 def _on_plan_store_changed(self):
-    plan_items = []
-    store = getattr(self, "_plan_store_ref", None)
-    if store is not None and hasattr(store, "list_items"):
-        try:
-            plan_items = store.list_items()
-        except Exception:
-            plan_items = []
+    store = self._plan_store_ref
+    plan_items = store.list_items() if store is not None else []
     self._set_plan_markers_from_items(plan_items)
 
 
@@ -541,7 +398,7 @@ def _repaint_cells(self, keys):
         self._cell_render_signatures = signatures
 
     for raw_key in set(keys or []):
-        key = _normalize_cell_key(raw_key)
+        key = normalize_cell_key(raw_key)
         if key is None:
             continue
         button = self.overview_cells.get(key)
@@ -592,9 +449,7 @@ def _rebuild_boxes(self, rows, cols, box_numbers):
     self.overview_cells = {}
     self.overview_box_live_labels = {}
     self.overview_box_groups = {}
-    self.overview_selected_key = None
-    self.overview_empty_multi_selected_keys = set()
-    self._overview_selection_anchor_key = None
+    self._selection.reset()
     self._cell_render_signatures = {}
     self._reset_detail()
 
@@ -841,30 +696,11 @@ def _paint_cell(self, button, box_num, position, record):
 
 
 def _set_selected_cell(self, box_num, position):
-    new_key = (box_num, position)
-    old_key = self.overview_selected_key
-    if old_key == new_key:
-        return
-
-    self.overview_selected_key = new_key
-    for key in (old_key, new_key):
-        if key is None:
-            continue
-        button = self.overview_cells.get(key)
-        if button is None:
-            continue
-        rec = self.overview_pos_map.get(key)
-        self._paint_cell(button, key[0], key[1], rec)
+    _repaint_cells(self, self._selection.set_active((box_num, position)))
 
 
 def _clear_selected_cell(self):
-    key = self.overview_selected_key
-    self.overview_selected_key = None
-    if key is not None:
-        button = self.overview_cells.get(key)
-        if button is not None:
-            rec = self.overview_pos_map.get(key)
-            self._paint_cell(button, key[0], key[1], rec)
+    _repaint_cells(self, self._selection.set_active(None))
 
 
 def _is_navigable_cell_button(button):
@@ -923,34 +759,9 @@ def _select_grid_cell(self, box_num, position, *, focus=True, ensure_visible=Tru
 
 
 def _resolve_grid_navigation_target(self, direction):
-    step_map = {
-        "left": (0, -1),
-        "right": (0, 1),
-        "up": (-1, 0),
-        "down": (1, 0),
-    }
-    step = step_map.get(str(direction or "").strip().lower())
-    if step is None:
-        return None
-
-    current_key = getattr(self, "overview_selected_key", None)
-    current_button = self.overview_cells.get(current_key) if current_key is not None else None
-    if not _is_navigable_cell_button(current_button):
-        return _first_visible_cell_key(self)
-
-    box_num, position = current_key
     rows, cols = _grid_dimensions(self)
-    row = (int(position) - 1) // cols
-    col = (int(position) - 1) % cols
-    dr, dc = step
-    row += dr
-    col += dc
-
-    while 0 <= row < rows and 0 <= col < cols:
-        next_key = (box_num, row * cols + col + 1)
-        if _is_navigable_cell_button(self.overview_cells.get(next_key)):
-            return next_key
-        row += dr
-        col += dc
-
-    return current_key
+    return self._selection.navigation_target(
+        str(direction or "").strip().lower(), rows=rows, cols=cols,
+        is_visible=lambda key: _is_navigable_cell_button(self.overview_cells.get(key)),
+        first_visible=lambda: _first_visible_cell_key(self),
+    )

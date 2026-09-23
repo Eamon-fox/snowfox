@@ -21,7 +21,7 @@ from ..schema_aliases import (
     normalize_record_sort_field,
 )
 from ..takeout_parser import extract_events, normalize_action
-from ..overview_table_query import query_overview_table
+from ..overview_table_query import InvalidSortColumn, query_overview_table
 from ..validators import normalize_date_arg, parse_date, validate_box, validate_position
 from ..yaml_ops import (
     coerce_audit_seq,
@@ -653,6 +653,13 @@ def tool_filter_records(
             limit=limit,
             offset=offset,
         )
+    except InvalidSortColumn as exc:
+        return {
+            "ok": False,
+            "error_code": "invalid_tool_input",
+            "message": str(exc),
+            "details": {"field": "sort_by", "value": exc.value, "allowed": exc.allowed},
+        }
     except ValueError as exc:
         return {
             "ok": False,

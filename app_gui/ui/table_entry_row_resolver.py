@@ -73,7 +73,7 @@ def resolve_entry_row(
         The active color-key field name.
     normalize_fn:
         A callable ``(raw_values) -> normalized_values`` that fills blanks
-        and coerces types (mirrors ``_normalize_entry_values``).
+        and coerces types using the draft store normalization rules.
 
     Returns
     -------

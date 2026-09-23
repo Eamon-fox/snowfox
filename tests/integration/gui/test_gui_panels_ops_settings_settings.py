@@ -270,13 +270,24 @@ class GuiPanelsSettingsDialogTests(GuiPanelsBaseCase):
         values = dialog.get_values()
         self.assertEqual("custom-model-id", values["ai_model"])
 
+    def test_settings_dialog_migrates_flash_and_lists_current_official_models(self):
+        from app_gui.main import SettingsDialog
+
+        dialog = SettingsDialog(config={"ai": {"provider": "deepseek", "model": "deepseek-v4-flash"}})
+        options = [dialog.ai_model_edit.itemText(i) for i in range(dialog.ai_model_edit.count())]
+        self.assertEqual(["deepseek-flash", "deepseek-v4-pro"], options)
+        self.assertEqual("deepseek-flash", dialog.get_values()["ai_model"])
+
     def test_settings_dialog_provider_switch_updates_model_dropdown_options(self):
         from app_gui.main import SettingsDialog
 
         dialog = SettingsDialog(config={"ai": {"provider": "zhipu", "model": "glm-5.1"}})
         options = [dialog.ai_model_edit.itemText(i) for i in range(dialog.ai_model_edit.count())]
 
-        self.assertIn("glm-5.2", options)
+        self.assertIn("glm-5.3", options)
+        self.assertIn("glm-5.3-flash", options)
+        self.assertIn("glm-5.3-flashx", options)
+        self.assertNotIn("glm-5.2", options)
         self.assertIn("glm-4.7", options)
         self.assertNotIn("glm-5.1", options)
         self.assertNotIn("glm-5", options)

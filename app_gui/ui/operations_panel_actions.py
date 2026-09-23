@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import date
 
 from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QFileDialog
 
 from app_gui.error_localizer import localize_error_payload
 from app_gui.i18n import tr
@@ -183,9 +184,6 @@ def reset_for_dataset_switch(self):
 
 
 def on_export_inventory_csv(self, checked=False, *, parent=None, yaml_path_override=None):
-    # Keep tests and monkeypatch points stable on operations_panel module symbols.
-    from app_gui.ui import operations_panel as _ops_panel
-
     _ = checked
     yaml_path = str(yaml_path_override or "").strip() or self.yaml_path_getter()
     from lib.inventory_paths import managed_dataset_name_from_yaml_path
@@ -200,7 +198,7 @@ def on_export_inventory_csv(self, checked=False, *, parent=None, yaml_path_overr
             default_name,
         )
 
-    path, _ = _ops_panel.QFileDialog.getSaveFileName(
+    path, _ = QFileDialog.getSaveFileName(
         parent or self,
         tr("operations.exportDialogTitle"),
         suggested_path,

@@ -2,14 +2,18 @@
 
 ``OverviewInteractionController`` owns grid cell click/hover/context-menu and
 drag-drop handling plus the hover/detail preview. It keeps no private state;
-all selection/hover state lives on the panel, driven through ``_p``.
+Selection state belongs to GridSelection; hover state belongs to the panel.
 """
+
+from contextlib import suppress
+
+from PySide6.QtWidgets import QMenu
 
 from PySide6.QtCore import Qt
 
 from app_gui.i18n import tr, t
 from app_gui.system_notice import build_system_notice
-from lib.position_fmt import box_tag_text, format_box_position_display, position_display_text
+from lib.position_fmt import box_tag_text, format_box_position_display, position_display_text, pos_to_display
 
 
 def _normalize_preview_value(raw):
@@ -26,6 +30,31 @@ class OverviewInteractionController:
     def __init__(self, panel):
         self._p = panel
 
+    def emit_takeout_prefill(self, box_num, position, record_id):
+        payload = {"box": int(box_num), "position": int(position), "record_id": int(record_id)}
+        self._p.request_prefill_background.emit(payload)
+        self._p.status_message.emit(t("overview.prefillTakeoutAuto", id=payload["record_id"]), 2000)
+
+    def emit_add_prefill(self, box_num, position, *, positions=None, background=True):
+        p = self._p
+        payload = {"box": int(box_num), "position": int(position)}
+        normalized_positions = set()
+        for raw_position in positions or ():
+            with suppress(TypeError, ValueError):
+                normalized_positions.add(int(raw_position))
+        normalized_positions = sorted(normalized_positions)
+        if len(normalized_positions) > 1:
+            payload["positions"] = normalized_positions
+
+        signal = p.request_add_prefill_background if background else p.request_add_prefill
+        signal.emit(payload)
+        position_text = (
+            ",".join(pos_to_display(value, p._current_layout) for value in normalized_positions)
+            if normalized_positions else payload["position"]
+        )
+        message_key = "overview.prefillAddAuto" if background else "overview.prefillAdd"
+        p.status_message.emit(t(message_key, box=payload["box"], position=position_text), 2000)
+
     def _emit_selected_empty_add_prefill(self, *, background=True, fallback_key=None):
         p = self._p
         selected_keys = p._selected_empty_keys_for_box()
@@ -37,11 +66,10 @@ class OverviewInteractionController:
 
         box_num = int(selected_keys[0][0])
         positions = sorted(int(position) for _box, position in selected_keys)
-        emitter = p._emit_add_prefill_background if background else p._emit_add_prefill
-        if len(positions) > 1:
-            emitter(box_num, positions[0], positions=positions)
-        else:
-            emitter(box_num, positions[0])
+        self.emit_add_prefill(
+            box_num, positions[0], positions=positions if len(positions) > 1 else None,
+            background=background,
+        )
         return True
 
     def _build_empty_range_selection(self, start_key, end_key):
@@ -75,7 +103,7 @@ class OverviewInteractionController:
             return
 
         if modifiers & Qt.ShiftModifier:
-            anchor_key = getattr(p, "_overview_selection_anchor_key", None)
+            anchor_key = p._selection.anchor
             if (
                 not isinstance(anchor_key, tuple)
                 or len(anchor_key) != 2
@@ -95,7 +123,7 @@ class OverviewInteractionController:
                 selected_keys = []
 
             selection_set = set(selected_keys)
-            anchor_key = getattr(p, "_overview_selection_anchor_key", None)
+            anchor_key = p._selection.anchor
             if key in selection_set:
                 selection_set.remove(key)
                 if anchor_key == key:
@@ -123,7 +151,7 @@ class OverviewInteractionController:
         record = p.overview_pos_map.get(key)
         if record:
             rec_id = int(record.get("id"))
-            p._emit_takeout_prefill_background(key[0], key[1], rec_id)
+            self.emit_takeout_prefill(key[0], key[1], rec_id)
             return
 
         if not p._selected_empty_keys_for_box(key[0]):
@@ -132,7 +160,7 @@ class OverviewInteractionController:
 
     def _navigate_grid_selection(self, direction):
         p = self._p
-        previous_key = getattr(p, "overview_selected_key", None)
+        previous_key = p._selection.active
         target_key = p._resolve_grid_navigation_target(direction)
         if target_key is None:
             return False
@@ -254,8 +282,6 @@ class OverviewInteractionController:
         )
 
     def on_cell_context_menu(self, box_num, position, global_pos):
-        from app_gui.ui import overview_panel as _ov_panel
-
         p = self._p
         record = p.overview_pos_map.get((box_num, position))
         if record:
@@ -265,8 +291,7 @@ class OverviewInteractionController:
             p._set_empty_multi_selection([key], anchor_key=key, active_key=key)
         p._select_grid_cell(box_num, position)
 
-        # Use overview_panel.QMenu to keep monkeypatch target stable in tests.
-        menu = _ov_panel.QMenu(p)
+        menu = QMenu(p)
         act_add = None
         act_takeout = None
 
@@ -280,7 +305,7 @@ class OverviewInteractionController:
             return
 
         if selected == act_add:
-            p._emit_add_prefill(box_num, position)
+            self.emit_add_prefill(box_num, position, background=False)
             return
 
         if not record:
@@ -315,10 +340,8 @@ class OverviewInteractionController:
         from PySide6.QtWidgets import QInputDialog
 
         from app_gui.error_localizer import localize_error_payload
-        from app_gui.ui import overview_panel as _ov_panel
-
         p = self._p
-        menu = _ov_panel.QMenu(p)
+        menu = QMenu(p)
         act_set_tag = menu.addAction(tr("overview.setBoxTag"))
         act_clear_tag = menu.addAction(tr("overview.clearBoxTag"))
         current_tag = self._current_box_tag(box_num)
@@ -352,77 +375,29 @@ class OverviewInteractionController:
             )
             if not ok:
                 return
-            response = p.bridge.set_box_tag(
-                yaml_path=yaml_path,
-                box=box_num,
-                tag=str(tag_text or ""),
-                execution_mode="execute",
-            )
-            if response.get("ok"):
-                msg = t("overview.boxTagUpdated", box=box_num)
-                p.refresh()
-                p.status_message.emit(msg, 2500)
-                self._emit_box_tag_notice(
-                    operation="updated",
-                    box_num=box_num,
-                    tag_value=str(tag_text or ""),
-                    response=response,
-                    text=msg,
-                    level="success",
-                    timeout_ms=2500,
-                )
-            else:
-                error_text = localize_error_payload(response, fallback=tr("overview.boxTagUpdateFailed"))
-                p.status_message.emit(
-                    error_text,
-                    3500,
-                )
-                self._emit_box_tag_notice(
-                    operation="updated",
-                    box_num=box_num,
-                    tag_value=str(tag_text or ""),
-                    response=response,
-                    text=error_text,
-                    level="error",
-                    timeout_ms=3500,
-                )
+            tag_value = str(tag_text or "")
+            operation, success_key = "updated", "overview.boxTagUpdated"
+        elif selected == act_clear_tag:
+            tag_value = ""
+            operation, success_key = "cleared", "overview.boxTagCleared"
+        else:
             return
 
-        if selected == act_clear_tag:
-            response = p.bridge.set_box_tag(
-                yaml_path=yaml_path,
-                box=box_num,
-                tag="",
-                execution_mode="execute",
-            )
-            if response.get("ok"):
-                msg = t("overview.boxTagCleared", box=box_num)
-                p.refresh()
-                p.status_message.emit(msg, 2500)
-                self._emit_box_tag_notice(
-                    operation="cleared",
-                    box_num=box_num,
-                    tag_value="",
-                    response=response,
-                    text=msg,
-                    level="success",
-                    timeout_ms=2500,
-                )
-            else:
-                error_text = localize_error_payload(response, fallback=tr("overview.boxTagUpdateFailed"))
-                p.status_message.emit(
-                    error_text,
-                    3500,
-                )
-                self._emit_box_tag_notice(
-                    operation="cleared",
-                    box_num=box_num,
-                    tag_value="",
-                    response=response,
-                    text=error_text,
-                    level="error",
-                    timeout_ms=3500,
-                )
+        response = p.bridge.set_box_tag(
+            yaml_path=yaml_path, box=box_num, tag=tag_value, execution_mode="execute",
+        )
+        if response.get("ok"):
+            message = t(success_key, box=box_num)
+            level, timeout_ms = "success", 2500
+            p.refresh()
+        else:
+            message = localize_error_payload(response, fallback=tr("overview.boxTagUpdateFailed"))
+            level, timeout_ms = "error", 3500
+        p.status_message.emit(message, timeout_ms)
+        self._emit_box_tag_notice(
+            operation=operation, box_num=box_num, tag_value=tag_value,
+            response=response, text=message, level=level, timeout_ms=timeout_ms,
+        )
 
     def _create_takeout_plan_item(self, record_id, box_num, position, record):
         """Create a takeout plan item directly from overview context menu."""

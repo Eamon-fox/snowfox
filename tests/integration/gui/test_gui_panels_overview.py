@@ -28,6 +28,50 @@ def _send_widget_mouse_event(
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 is required for GUI panel tests")
 class GuiPanelsOverviewTests(GuiPanelsBaseCase):
+    def test_plan_read_failure_preserves_existing_grid_markers(self):
+        panel = self._new_overview_panel()
+        item = _make_takeout_item(record_id=5, position=1, box=1)
+        plan_store = SimpleNamespace(list_items=MagicMock(return_value=[item]))
+        panel.bind_plan_store(plan_store)
+        before = dict(panel._operation_markers)
+        failure = RuntimeError("plan read failed")
+        plan_store.list_items.side_effect = failure
+        with self.assertRaises(RuntimeError) as raised:
+            panel.refresh_plan_store_view()
+        self.assertIs(failure, raised.exception)
+        self.assertEqual(before, panel._operation_markers)
+        self.assertEqual("takeout", before[(1, 1)]["type"])
+        panel.bind_plan_store(None)
+        self.assertEqual({}, panel._operation_markers)
+        panel.deleteLater()
+
+    def test_add_prefill_modes_share_payload_and_keep_distinct_signals(self):
+        previous_language = get_language()
+        self.addCleanup(lambda: set_language(previous_language))
+        set_language("en")
+        panel = self._new_overview_panel()
+        panel._current_layout = {"rows": 2, "cols": 3, "indexing": "alphanumeric"}
+        foreground, background, messages = [], [], []
+        panel.request_add_prefill.connect(foreground.append)
+        panel.request_add_prefill_background.connect(background.append)
+        panel.status_message.connect(lambda message, timeout: messages.append((message, timeout)))
+        try:
+            for is_background in (True, False):
+                panel._interactions.emit_add_prefill(
+                    2, 1, positions=[4, "1", 4, "invalid"], background=is_background,
+                )
+            expected = [{"box": 2, "position": 1, "positions": [1, 4]}]
+            self.assertEqual(expected, foreground)
+            self.assertEqual(expected, background)
+            self.assertNotEqual(messages[0][0], messages[1][0])
+            for message, timeout in messages:
+                self.assertIn("A1,B1", message)
+                self.assertEqual(2000, timeout)
+            panel._interactions.emit_add_prefill(2, 4)
+            self.assertEqual({"box": 2, "position": 4}, background[-1])
+        finally:
+            panel.deleteLater()
+
     def test_wrap_cell_text_lines_elides_last_visible_line_with_ascii_dots(self):
         from app_gui.ui.overview_panel_cell_button import CellButton, _wrap_cell_text_lines
 
@@ -242,7 +286,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
 
         panel.on_cell_clicked(1, 1)
 
-        self.assertEqual((1, 1), panel.overview_selected_key)
+        self.assertEqual((1, 1), panel.selected_slot())
         # Occupied cell: only emits background thaw prefill, not add
         self.assertEqual([], emitted_bg_add)
         self.assertEqual([{"box": 1, "position": 1, "record_id": 5}], emitted_bg_thaw)
@@ -268,7 +312,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
 
         panel.on_cell_clicked(1, 1)
 
-        self.assertEqual((1, 1), panel.overview_selected_key)
+        self.assertEqual((1, 1), panel.selected_slot())
         self.assertEqual([{"box": 1, "position": 1}], emitted_bg_add)
         self.assertEqual([], emitted_bg_thaw)
         self.assertEqual([], emitted_add)
@@ -293,7 +337,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.mouseClick(panel.overview_cells[(1, 3)], Qt.LeftButton, Qt.ControlModifier)
             self._app.processEvents()
 
-            self.assertEqual({(1, 1), (1, 3)}, panel.overview_empty_multi_selected_keys)
+            self.assertEqual({(1, 1), (1, 3)}, panel._selection.empty_keys)
             self.assertEqual(
                 {"box": 1, "position": 1, "positions": [1, 3]},
                 emitted_bg_add[-1],
@@ -322,7 +366,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.mouseClick(panel.overview_cells[(1, 2)], Qt.LeftButton, Qt.ControlModifier)
             self._app.processEvents()
 
-            self.assertEqual({(1, 1)}, panel.overview_empty_multi_selected_keys)
+            self.assertEqual({(1, 1)}, panel._selection.empty_keys)
             self.assertEqual({"box": 1, "position": 1}, emitted_bg_add[-1])
             self.assertTrue(panel._is_cell_selected(1, 1))
             self.assertFalse(panel._is_cell_selected(1, 2))
@@ -357,7 +401,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
 
             self.assertEqual(
                 {(1, 1), (1, 2), (1, 4), (1, 5)},
-                panel.overview_empty_multi_selected_keys,
+                panel._selection.empty_keys,
             )
             self.assertEqual(
                 {"box": 1, "position": 1, "positions": [1, 2, 4, 5]},
@@ -384,7 +428,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.mouseClick(panel.overview_cells[(2, 1)], Qt.LeftButton, Qt.ShiftModifier)
             self._app.processEvents()
 
-            self.assertEqual({(2, 1)}, panel.overview_empty_multi_selected_keys)
+            self.assertEqual({(2, 1)}, panel._selection.empty_keys)
             self.assertEqual({"box": 2, "position": 1}, emitted_bg_add[-1])
         finally:
             panel.hide()
@@ -417,7 +461,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.mouseClick(panel.overview_cells[(1, 4)], Qt.LeftButton)
             self._app.processEvents()
 
-            self.assertEqual(set(), panel.overview_empty_multi_selected_keys)
+            self.assertEqual(set(), panel._selection.empty_keys)
             self.assertEqual(
                 {"box": 1, "position": 4, "record_id": 8},
                 emitted_takeout_bg[-1],
@@ -795,7 +839,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
         panel.plan_items_requested.connect(lambda payload: staged_items.extend(payload))
 
         from unittest.mock import patch, MagicMock
-        with patch("app_gui.ui.overview_panel.QMenu") as MockMenu:
+        with patch("app_gui.ui.overview_panel_interactions.QMenu") as MockMenu:
             mock_menu = MagicMock()
             MockMenu.return_value = mock_menu
             mock_act_takeout = MagicMock()
@@ -803,7 +847,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             mock_menu.exec.return_value = mock_act_takeout
             panel.on_cell_context_menu(1, 1, button.mapToGlobal(button.rect().center()))
 
-        self.assertEqual((1, 1), panel.overview_selected_key)
+        self.assertEqual((1, 1), panel.selected_slot())
         self.assertEqual(1, len(staged_items))
         self.assertEqual("takeout", staged_items[0].get("action"))
         self.assertEqual(5, staged_items[0].get("record_id"))
@@ -827,7 +871,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
         panel.plan_items_requested.connect(lambda payload: staged_items.extend(payload))
 
         from unittest.mock import patch, MagicMock
-        with patch("app_gui.ui.overview_panel.QMenu") as MockMenu:
+        with patch("app_gui.ui.overview_panel_interactions.QMenu") as MockMenu:
             mock_menu = MagicMock()
             MockMenu.return_value = mock_menu
             mock_act_takeout = MagicMock()
@@ -835,7 +879,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             mock_menu.exec.return_value = mock_act_takeout
             panel.on_cell_context_menu(1, 1, button.mapToGlobal(button.rect().center()))
 
-        self.assertEqual((1, 1), panel.overview_selected_key)
+        self.assertEqual((1, 1), panel.selected_slot())
         self.assertEqual(1, len(staged_items))
         self.assertEqual("takeout", staged_items[0].get("action"))
 
@@ -1064,7 +1108,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
         panel.request_add_prefill.connect(lambda payload: emitted_add.append(payload))
 
         from unittest.mock import patch, MagicMock
-        with patch("app_gui.ui.overview_panel.QMenu") as MockMenu:
+        with patch("app_gui.ui.overview_panel_interactions.QMenu") as MockMenu:
             mock_menu = MagicMock()
             MockMenu.return_value = mock_menu
             mock_act_add = MagicMock()
@@ -1072,59 +1116,72 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             mock_menu.exec.return_value = mock_act_add
             panel.on_cell_context_menu(1, 1, button.mapToGlobal(button.rect().center()))
 
-        self.assertEqual((1, 1), panel.overview_selected_key)
+        self.assertEqual((1, 1), panel.selected_slot())
         self.assertEqual([{"box": 1, "position": 1}], emitted_add)
 
-    def test_overview_set_box_tag_emits_system_notice_event(self):
-        panel = self._new_overview_panel()
-        panel.bridge = SimpleNamespace(
-            set_box_tag=MagicMock(return_value={"ok": True, "result": {"box": 1, "tag_after": "virus"}})
-        )
-        panel.refresh = MagicMock()
-        events = []
-        panel.operation_event.connect(lambda payload: events.append(payload))
+    def test_box_tag_set_and_clear_report_success_and_failure(self):
+        for operation in ("updated", "cleared"):
+            for ok in (True, False):
+                with self.subTest(operation=operation, ok=ok):
+                    panel = self._new_overview_panel()
+                    response = {"ok": ok} if ok else {"ok": False, "error_code": "write_failed", "message": "boom"}
+                    panel.bridge = SimpleNamespace(set_box_tag=MagicMock(return_value=response))
+                    panel.refresh = MagicMock()
+                    events, messages = [], []
+                    panel.operation_event.connect(events.append)
+                    panel.status_message.connect(lambda text, timeout: messages.append((text, timeout)))
+                    with patch("app_gui.ui.overview_panel_interactions.QMenu") as menu_cls, patch(
+                        "PySide6.QtWidgets.QInputDialog.getText", return_value=("virus", True),
+                    ) as prompt:
+                        act_set, act_clear = object(), MagicMock()
+                        menu = menu_cls.return_value
+                        menu.addAction.side_effect = [act_set, act_clear]
+                        menu.exec.return_value = act_set if operation == "updated" else act_clear
+                        panel.on_box_context_menu(1, panel.rect().center())
+                    panel.bridge.set_box_tag.assert_called_once_with(
+                        yaml_path=self.fake_yaml_path, box=1,
+                        tag="virus" if operation == "updated" else "", execution_mode="execute",
+                    )
+                    self.assertEqual(int(operation == "updated"), prompt.call_count)
+                    self.assertEqual(int(ok), panel.refresh.call_count)
+                    self.assertEqual(1, len(events))
+                    self.assertEqual("system_notice", events[0]["type"])
+                    self.assertEqual("box.tag." + operation, events[0]["code"])
+                    self.assertEqual("success" if ok else "error", events[0]["level"])
+                    self.assertEqual(ok, events[0]["data"]["ok"])
+                    self.assertEqual(1, events[0]["data"]["box"])
+                    self.assertEqual(None if ok else "write_failed", events[0]["data"]["error_code"])
+                    self.assertEqual(1, len(messages))
+                    self.assertEqual(2500 if ok else 3500, messages[0][1])
+                    panel.deleteLater()
 
-        with patch("app_gui.ui.overview_panel.QMenu") as menu_cls, patch(
-            "PySide6.QtWidgets.QInputDialog.getText",
-            return_value=("virus", True),
-        ):
-            menu = MagicMock()
-            menu_cls.return_value = menu
-            act_set = MagicMock()
-            act_clear = MagicMock()
-            menu.addAction.side_effect = [act_set, act_clear]
-            menu.exec.return_value = act_set
-            panel.on_box_context_menu(1, panel.mapToGlobal(panel.rect().center()))
-
-        self.assertEqual(1, len(events))
-        self.assertEqual("system_notice", events[0].get("type"))
-        self.assertEqual("box.tag.updated", events[0].get("code"))
-        self.assertEqual("success", events[0].get("level"))
-        self.assertEqual(1, int((events[0].get("data") or {}).get("box")))
-
-    def test_overview_clear_box_tag_failure_emits_error_system_notice(self):
-        panel = self._new_overview_panel()
-        panel.bridge = SimpleNamespace(
-            set_box_tag=MagicMock(return_value={"ok": False, "error_code": "write_failed", "message": "boom"})
-        )
-        panel.refresh = MagicMock()
-        events = []
-        panel.operation_event.connect(lambda payload: events.append(payload))
-
-        with patch("app_gui.ui.overview_panel.QMenu") as menu_cls:
-            menu = MagicMock()
-            menu_cls.return_value = menu
-            act_set = MagicMock()
-            act_clear = MagicMock()
-            menu.addAction.side_effect = [act_set, act_clear]
-            menu.exec.return_value = act_clear
-            panel.on_box_context_menu(1, panel.mapToGlobal(panel.rect().center()))
-
-        self.assertEqual(1, len(events))
-        self.assertEqual("system_notice", events[0].get("type"))
-        self.assertEqual("box.tag.cleared", events[0].get("code"))
-        self.assertEqual("error", events[0].get("level"))
-        self.assertEqual("write_failed", (events[0].get("data") or {}).get("error_code"))
+    def test_box_tag_cancel_and_missing_dataset_do_not_submit(self):
+        for mode in ("cancel_menu", "cancel_input", "missing_dataset"):
+            with self.subTest(mode=mode):
+                panel = self._new_overview_panel()
+                panel.bridge = SimpleNamespace(set_box_tag=MagicMock())
+                panel.refresh = MagicMock()
+                events = []
+                panel.operation_event.connect(events.append)
+                if mode == "missing_dataset":
+                    panel.yaml_path_getter = lambda: ""
+                with patch("app_gui.ui.overview_panel_interactions.QMenu") as menu_cls, patch(
+                    "PySide6.QtWidgets.QInputDialog.getText", return_value=("ignored", False),
+                ) as prompt:
+                    act_set, act_clear = object(), MagicMock()
+                    menu = menu_cls.return_value
+                    menu.addAction.side_effect = [act_set, act_clear]
+                    menu.exec.return_value = None if mode == "cancel_menu" else act_set
+                    panel.on_box_context_menu(1, panel.rect().center())
+                panel.bridge.set_box_tag.assert_not_called()
+                panel.refresh.assert_not_called()
+                self.assertEqual(int(mode == "cancel_input"), prompt.call_count)
+                if mode == "missing_dataset":
+                    self.assertEqual(1, len(events))
+                    self.assertEqual("yaml_path_missing", events[0]["data"]["error_code"])
+                else:
+                    self.assertEqual([], events)
+                panel.deleteLater()
 
     def test_overview_arrow_keys_move_selection_within_box_and_stop_at_edges(self):
         panel = self._new_overview_panel()
@@ -1148,21 +1205,21 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
 
             QTest.keyClick(panel.overview_cells[(1, 1)], Qt.Key_Right)
             self._app.processEvents()
-            self.assertEqual((1, 2), panel.overview_selected_key)
+            self.assertEqual((1, 2), panel.selected_slot())
             self.assertEqual((1, 2), panel.overview_hover_key)
 
             QTest.keyClick(panel.overview_cells[(1, 2)], Qt.Key_Down)
             self._app.processEvents()
-            self.assertEqual((1, 4), panel.overview_selected_key)
+            self.assertEqual((1, 4), panel.selected_slot())
             self.assertEqual((1, 4), panel.overview_hover_key)
 
             QTest.keyClick(panel.overview_cells[(1, 4)], Qt.Key_Right)
             self._app.processEvents()
-            self.assertEqual((1, 4), panel.overview_selected_key)
+            self.assertEqual((1, 4), panel.selected_slot())
 
             QTest.keyClick(panel.overview_cells[(1, 4)], Qt.Key_Down)
             self._app.processEvents()
-            self.assertEqual((1, 4), panel.overview_selected_key)
+            self.assertEqual((1, 4), panel.selected_slot())
         finally:
             panel.hide()
 
@@ -1177,7 +1234,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.ov_scroll.viewport(), Qt.Key_Right)
             self._app.processEvents()
 
-            self.assertEqual((1, 2), panel.overview_selected_key)
+            self.assertEqual((1, 2), panel.selected_slot())
             self.assertEqual((1, 2), panel.overview_hover_key)
         finally:
             panel.hide()
@@ -1194,7 +1251,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.overview_cells[(1, 1)], Qt.Key_Right)
             self._app.processEvents()
 
-            self.assertEqual((1, 3), panel.overview_selected_key)
+            self.assertEqual((1, 3), panel.selected_slot())
             self.assertEqual((1, 3), panel.overview_hover_key)
         finally:
             panel.hide()
@@ -1230,7 +1287,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.overview_cells[(1, 1)], Qt.Key_Right)
             self._app.processEvents()
 
-            self.assertEqual((1, 2), panel.overview_selected_key)
+            self.assertEqual((1, 2), panel.selected_slot())
             self.assertEqual([], emitted_add)
             self.assertEqual([{"box": 1, "position": 2}], emitted_add_bg)
             self.assertEqual([], emitted_takeout)
@@ -1239,7 +1296,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.overview_cells[(1, 2)], Qt.Key_Left)
             self._app.processEvents()
 
-            self.assertEqual((1, 1), panel.overview_selected_key)
+            self.assertEqual((1, 1), panel.selected_slot())
             self.assertEqual(
                 [{"box": 1, "position": 1, "record_id": 11}],
                 emitted_takeout_bg,
@@ -1248,7 +1305,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.overview_cells[(1, 1)], Qt.Key_Left)
             self._app.processEvents()
 
-            self.assertEqual((1, 1), panel.overview_selected_key)
+            self.assertEqual((1, 1), panel.selected_slot())
             self.assertEqual(
                 [{"box": 1, "position": 1, "record_id": 11}],
                 emitted_takeout_bg,
@@ -1275,8 +1332,8 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.overview_cells[(1, 2)], Qt.Key_Right)
             self._app.processEvents()
 
-            self.assertEqual({(1, 3)}, panel.overview_empty_multi_selected_keys)
-            self.assertEqual((1, 3), panel.overview_selected_key)
+            self.assertEqual({(1, 3)}, panel._selection.empty_keys)
+            self.assertEqual((1, 3), panel.selected_slot())
             self.assertEqual({"box": 1, "position": 3}, emitted_add_bg[-1])
         finally:
             panel.hide()
@@ -1297,7 +1354,7 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             self._app.processEvents()
 
             self.assertEqual(2, panel.ov_filter_keyword.cursorPosition())
-            self.assertEqual((1, 1), panel.overview_selected_key)
+            self.assertEqual((1, 1), panel.selected_slot())
         finally:
             panel.hide()
 
@@ -1318,6 +1375,6 @@ class GuiPanelsOverviewTests(GuiPanelsBaseCase):
             QTest.keyClick(panel.ov_table, Qt.Key_Right)
             self._app.processEvents()
 
-            self.assertEqual((1, 1), panel.overview_selected_key)
+            self.assertEqual((1, 1), panel.selected_slot())
         finally:
             panel.hide()

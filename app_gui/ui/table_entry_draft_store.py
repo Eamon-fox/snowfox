@@ -15,13 +15,11 @@ without a running ``QApplication`` (signals just won't fire).
 
 from __future__ import annotations
 
-from contextlib import suppress
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QObject, Signal
 
 from lib.custom_fields import get_color_key, get_effective_fields
-from lib.overview_table_query import build_overview_row_search_text
 from lib.schema_aliases import get_input_stored_at
 
 from app_gui.ui.table_entry_row_resolver import SlotState, resolve_entry_rows
@@ -51,7 +49,6 @@ class TableEntryDraftStore(QObject):
         self._plan_store: Any = None  # PlanStore reference (read-only)
         self._meta: dict = {}
         self._records: list = []
-        self._layout: dict = {}
 
     # ── setup ────────────────────────────────────────────────────────
 
@@ -63,12 +60,10 @@ class TableEntryDraftStore(QObject):
         self,
         meta: dict,
         records: list,
-        layout: dict,
     ) -> None:
         """Update metadata context used for field definitions and color key."""
         self._meta = dict(meta or {})
         self._records = list(records or [])
-        self._layout = dict(layout or {})
 
     # ── draft CRUD ───────────────────────────────────────────────────
 
@@ -143,7 +138,7 @@ class TableEntryDraftStore(QObject):
         - ``editable``: True for single-slot items
         """
         store = self._plan_store
-        if store is None or not hasattr(store, "list_items"):
+        if store is None:
             return {}
 
         field_defs = self._field_definitions()
@@ -151,12 +146,7 @@ class TableEntryDraftStore(QObject):
             self._meta, inventory=self._records,
         )
         slot_map: Dict[Tuple[int, int], dict] = {}
-        try:
-            plan_items = store.list_items()
-        except Exception:
-            plan_items = []
-
-        for item in list(plan_items or []):
+        for item in store.list_items():
             if not isinstance(item, dict):
                 continue
             if str(item.get("action") or "").strip().lower() != "add":
@@ -255,11 +245,7 @@ class TableEntryDraftStore(QObject):
         raw_rows: List[dict],
         data_columns: Sequence[str],
     ) -> List[dict]:
-        """Overlay drafts/staged onto raw projection rows.
-
-        Replaces the old ``_overlay_current_view_rows`` in
-        ``overview_panel_table.py``.
-        """
+        """Overlay drafts/staged onto raw projection rows."""
         color_key = get_color_key(self._meta, inventory=self._records)
         return resolve_entry_rows(
             raw_rows,
@@ -270,53 +256,6 @@ class TableEntryDraftStore(QObject):
             normalize_fn=self.normalize_entry_values,
         )
 
-    def resolve_single_row(
-        self,
-        row_data: dict,
-        entry_values: dict,
-    ) -> dict:
-        """Resolve a single row after a cell edit.
-
-        Replaces the old ``_row_with_entry_values``.
-        """
-        from app_gui.ui.table_entry_row_resolver import resolve_entry_row
-
-        slot_key = _slot_key_from_row(row_data)
-        color_key = get_color_key(self._meta, inventory=self._records)
-        data_columns = list(row_data.get("_data_columns") or [])
-
-        staged = self.staged_slot_map().get(slot_key) if slot_key is not None else None
-        draft = self._drafts.get(slot_key) if slot_key is not None else None
-
-        # Build a temporary raw row with the new entry_values merged
-        raw_row = dict(row_data)
-        raw_values = dict(raw_row.get("values") or {})
-        raw_values.update(self.normalize_entry_values(entry_values))
-        raw_row["values"] = raw_values
-        raw_row["color_value"] = str(raw_values.get(color_key) or "")
-
-        # For the resolver, we compute confirmed/locked from staged vs draft
-        row_locked = bool(staged and not staged.get("editable"))
-        row_confirmed = bool(staged) and not isinstance(draft, dict)
-
-        raw_row["row_locked"] = row_locked
-        raw_row["row_confirmed"] = row_confirmed
-        raw_row["search_text"] = build_overview_row_search_text(data_columns, raw_values)
-
-        if staged and not draft:
-            raw_row["slot_state"] = (
-                SlotState.STAGED.value
-                if staged.get("editable")
-                else SlotState.STAGED_LOCKED.value
-            )
-        elif draft is not None:
-            raw_row["slot_state"] = SlotState.DRAFT.value
-        else:
-            raw_row["slot_state"] = SlotState.EMPTY.value
-
-        return raw_row
-
-    # ── normalisation helpers (exposed for callers) ──────────────────
 
     def normalize_entry_values(self, values: dict) -> dict:
         """Normalise raw field values (fill blanks, coerce stored_at)."""
@@ -328,26 +267,10 @@ class TableEntryDraftStore(QObject):
         normalized["frozen_at"] = stored_at
         return normalized
 
-    def entry_values_signature(self, values: dict) -> tuple:
-        """Public wrapper for signature computation."""
-        return self._values_signature(values)
-
     def entry_columns(self) -> set:
         """Return the set of editable column names."""
         return {"stored_at", "frozen_at"} | set(self._field_definitions())
 
-    def staged_entry_values_for_slot(
-        self, slot_key: Tuple[int, int]
-    ) -> dict:
-        """Return normalised staged values, or blank entry values."""
-        if slot_key is None:
-            return self._blank_entry_values()
-        staged = self.staged_slot_map().get(tuple(slot_key))
-        if not staged:
-            return self._blank_entry_values()
-        return self.normalize_entry_values(staged.get("values") or {})
-
-    # ── private helpers ──────────────────────────────────────────────
 
     def _field_definitions(self) -> dict:
         field_defs = {}
@@ -391,11 +314,3 @@ def _normalize_add_item_positions(item: dict) -> tuple:
             continue
         normalized.append(position)
     return tuple(sorted(normalized))
-
-
-def _slot_key_from_row(row_data: dict) -> Optional[Tuple[int, int]]:
-    box = _safe_int(row_data.get("box"))
-    position = _safe_int(row_data.get("position"))
-    if box is None or position is None:
-        return None
-    return (box, position)

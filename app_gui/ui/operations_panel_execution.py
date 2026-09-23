@@ -5,7 +5,6 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 
-from app_gui.application import PlanRunUseCase
 from app_gui.bridge_write_runner import execute_bridge_rollback
 from app_gui.i18n import tr
 from app_gui.error_localizer import localize_error_payload
@@ -54,12 +53,6 @@ def _is_undo_eligible_item(item):
     action = str((item or {}).get("action") or "").lower()
     return action != "rollback"
 
-
-def _resolve_plan_run_use_case(panel):
-    use_case = getattr(panel, "_plan_run_use_case", None)
-    if use_case is not None:
-        return use_case
-    return PlanRunUseCase()
 
 
 class _PlanExecutionWorker(QObject):
@@ -159,13 +152,6 @@ class _PlanExecutionResultReceiver(QObject):
         self.deleteLater()
 
 
-def _summarize_execution(panel, report, rollback_info):
-    use_case = _resolve_plan_run_use_case(panel)
-    summarize_fn = getattr(use_case, "summarize", None)
-    if callable(summarize_fn):
-        return summarize_fn(report=report, rollback_info=rollback_info)
-    return {}
-
 
 def _format_box_position(panel, box, position):
     return format_box_position_display(
@@ -214,7 +200,7 @@ def execute_plan(self):
         return
 
     try:
-        run_use_case = _resolve_plan_run_use_case(self)
+        run_use_case = self._plan_run_use_case
         run_result = run_use_case.execute(
             yaml_path=yaml_path,
             plan_items=plan_items,
@@ -246,7 +232,7 @@ def _start_execute_plan_worker(self, *, yaml_path, plan_items, original_plan):
 
     thread = QThread(self)
     worker = _PlanExecutionWorker(
-        run_use_case=_resolve_plan_run_use_case(self),
+        run_use_case=self._plan_run_use_case,
         yaml_path=yaml_path,
         plan_items=plan_items,
         bridge=self.bridge,
@@ -291,7 +277,7 @@ def _finish_execute_plan(self, *, report, results, original_plan, yaml_path):
 
     _ops_plan_store._run_plan_preflight(self, trigger="post_execute")
     _ops_plan_toolbar._refresh_after_plan_items_changed(self)
-    execution_stats = _summarize_execution(self, report, rollback_info)
+    execution_stats = self._plan_run_use_case.summarize(report=report, rollback_info=rollback_info)
     _show_plan_result(
         self,
         results,
@@ -603,7 +589,7 @@ def _build_execution_failure_lines(
 
 def _show_plan_result(self, results, report=None, rollback_info=None, execution_stats=None):
     if not isinstance(execution_stats, dict):
-        execution_stats = _summarize_execution(self, report, rollback_info)
+        execution_stats = self._plan_run_use_case.summarize(report=report, rollback_info=rollback_info)
     ok_count = execution_stats.get("ok_count", sum(1 for r in results if r[0] == "OK"))
     fail_count = execution_stats.get("fail_count", sum(1 for r in results if r[0] == "FAIL"))
     applied_count = execution_stats.get("applied_count", ok_count)
